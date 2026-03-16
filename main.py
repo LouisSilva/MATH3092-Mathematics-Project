@@ -1,16 +1,10 @@
-﻿# This is a sample Python script.
+﻿
 
-# Press Shift+F10 to execute it or replace it with your code.
-# Press Double Shift to search everywhere for classes, files, tool windows, actions, and settings.
+from src.fma_utils import create_dataset_df
 
-
-def print_hi(name):
-    # Use a breakpoint in the code line below to debug your script.
-    print(f'Hi, {name}')  # Press Ctrl+F8 to toggle the breakpoint.
-
-
-# Press the green button in the gutter to run the script.
 if __name__ == '__main__':
-    print_hi('PyCharm')
+    METADATA_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\fma\\fma_metadata"
+    USER_SONGS_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\my_songs"  # random extra songs that aren't part of the FMA dataset
+    AUDIO_FILES_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\fma\\fma_small\\fma_small"
 
-# See PyCharm help at https://www.jetbrains.com/help/pycharm/
+    tracks, my_songs = create_dataset_df(METADATA_DIR, AUDIO_FILES_DIR, USER_SONGS_DIR)
