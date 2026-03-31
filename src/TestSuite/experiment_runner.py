@@ -103,7 +103,7 @@ class ExperimentRunner:
             "Target ID": target_id,
             "Predicted ID": None,
             "Distance": float('inf'),
-            "Search Algorithm Processing Time (s)": 0.0,
+            "Query Time (s)": 0.0,
             "Status": TestStatus.ERROR
         }
 
