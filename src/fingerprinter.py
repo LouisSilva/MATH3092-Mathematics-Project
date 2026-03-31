@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-from spectrogram_generation import compute_spectrogram
+from .spectrogram_generation import compute_spectrogram
 
 class FingerprintStrategy(ABC):
     """An interface for converting a projected matrix into a fingerprint."""

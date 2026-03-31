@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 from tqdm import tqdm
 import scipy
 
-from fingerprinter import SVDFingerprinter
+from .fingerprinter import SVDFingerprinter
 
 class SearchStrategy(ABC):
     """An interface for searching a query fingerprint in a database."""

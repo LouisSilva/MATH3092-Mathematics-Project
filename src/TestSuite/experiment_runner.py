@@ -137,7 +137,7 @@ class ExperimentRunner:
             # Record the results
             result_entry["Predicted ID"] = predicted_id
             result_entry["Distance"] = dist
-            result_entry["Search Algorithm Processing Time (s)"] = end_time - start_time
+            result_entry["Query Time (s)"] = end_time - start_time
 
             # Process the different test types
             if test_type == TestType.POSITIVE:
@@ -217,7 +217,7 @@ class ExperimentRunner:
                 # Verified Accuracy (Using Threshold)
                 verified_accuracy = (pos_group['Status'] == TestStatus.PASS).mean() * 100
 
-                avg_time = pos_group['Search Algorithm Processing Time (s)'].mean()
+                avg_time = pos_group['Query Time (s)'].mean()
 
                 # Distances for Correct IDs vs Incorrect IDs
                 correct_matches = pos_group[raw_hits]

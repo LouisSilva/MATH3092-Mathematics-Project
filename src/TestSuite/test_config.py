@@ -4,7 +4,7 @@
 class TestConfig:
     """Configuration for a test."""
     f_s: int = 44100
-    snippet_duration_sec: float = 4.0
+    snippet_duration_sec: float = 5.0
     match_threshold: float = 0.3
     n_db_tracks: int = 100
     n_query_tracks: int = 20
