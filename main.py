@@ -1,6 +1,4 @@
-﻿
-
-from src.fma_utils import create_dataset_df
+﻿from src.fma_utils import create_dataset_df
 
 if __name__ == '__main__':
     METADATA_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\fma\\fma_metadata"

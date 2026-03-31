@@ -3,7 +3,7 @@ import librosa
 
 def load_audio(
         file_path: str,
-        f_s: int = 22050,
+        f_s: int = 44100,
         offset: float = 0.0,
         duration: float | None = None
 ) -> tuple[np.ndarray, int]:
@@ -31,7 +31,7 @@ def compute_spectrogram_from_audio(
         audio: np.ndarray,
         L: int = 2048,
         H: int = 1024,
-        F: int = 128,
+        B: int = 128,
         tau: int = 80,
         window_type: str = "hann"
 ) -> np.ndarray:
@@ -42,15 +42,15 @@ def compute_spectrogram_from_audio(
         audio: 1-D array of samples.
         L: Number of samples in each segment.
         H: Sample offset between adjacent segments (hop size).
-        F: Number of Mel bins to use.
+        B: Number of Mel bins to use.
         tau: The decibel limit.
         window_type: Window function used in the spectrogram computation.
 
     Returns:
-        A spectrogram with shape ``(M, F)``
+        A spectrogram with shape ``(M, B)``
         where the values lie in the range [0, 1].
     """
-    mel_spectrogram = librosa.feature.melspectrogram(y=audio, n_fft=L, hop_length=H, n_mels=F, window=window_type)
+    mel_spectrogram = librosa.feature.melspectrogram(y=audio, n_fft=L, hop_length=H, n_mels=B, window=window_type)
     power = np.abs(mel_spectrogram) ** 2
 
     # Convert to dB
@@ -65,10 +65,10 @@ def compute_spectrogram_from_audio(
 
 def compute_spectrogram(
         file_path: str,
-        f_s: int = 22050,
+        f_s: int = 44100,
         L: int = 2048,
         H: int = 1024,
-        F: int = 128,
+        B: int = 128,
         tau: int = 80,
         window_type: str = "hann"
 ) -> np.ndarray:
@@ -80,13 +80,13 @@ def compute_spectrogram(
         f_s: The sampling rate to use for loading the audio.
         L: Number of samples in each segment.
         H: Sample offset between adjacent segments (hop size).
-        F: Number of Mel bins to use.
+        B: Number of Mel bins to use.
         tau: Decibel limit.
         window_type: Window function used in the spectrogram computation.
 
     Returns:
-        A spectrogram with shape ``(M, F)``
+        A spectrogram with shape ``(M, B)``
         where the values lie in the range [0, 1].
     """
     audio, _ = load_audio(file_path, f_s=f_s)
-    return compute_spectrogram_from_audio(audio, L=L, H=H, F=F, tau=tau, window_type=window_type)
+    return compute_spectrogram_from_audio(audio, L=L, H=H, B=B, tau=tau, window_type=window_type)

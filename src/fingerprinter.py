@@ -8,17 +8,14 @@ from spectrogram_generation import compute_spectrogram
 
 class FingerprintStrategy(ABC):
     """An interface for converting a projected matrix into a fingerprint."""
-
     @abstractmethod
     def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
         pass
-
 
 class BinaryFingerprint(FingerprintStrategy):
     """
     Generates a binary fingerprint using median-thresholding.
     """
-
     def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
         # Find the median of each row
         medians = np.median(projected_matrix, axis=1, keepdims=True)
@@ -27,12 +24,10 @@ class BinaryFingerprint(FingerprintStrategy):
         binary_fingerprint = projected_matrix > medians
         return binary_fingerprint
 
-
 class DeltaFingerprint(FingerprintStrategy):
     """
     Generates a binary fingerprint using temporal difference (delta features).
     """
-
     def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
         # Subtract previous row from current row
         delta = projected_matrix[1:] - projected_matrix[:-1]
@@ -47,36 +42,36 @@ class SVDFingerprinter:
     def __init__(
             self,
             fingerprint_strategy: FingerprintStrategy,
-            beta: int = 50000,
+            gamma: int = 50000,
             kappa: int = 50,
-            r: int = 64,
+            phi: int = 64,
             f_s: int = 44100,
             L: int = 2048,
             H: int = 1024,
-            F: int = 128,
+            B: int = 128,
             tau: int = 80,
             window_type: str = "hann",
             random_state: int = 42,
     ):
         self.fingerprint_strategy = fingerprint_strategy
-        self.beta = beta
+        self.gamma = gamma
         self.kappa = kappa
-        self.r = r
+        self.phi = phi
         self.f_s = f_s
         self.L = L
         self.H = H
-        self.F = F
+        self.B = B
         self.tau = tau
         self.window_type = window_type
 
         self.is_fitted = False
-        self.model = PCA(n_components=r, random_state=random_state)
+        self.model = PCA(n_components=phi, random_state=random_state)
 
     def train(self, file_list: list[str]):
         """
         Fits the SVD basis using a random subset of segments from the training files.
         """
-        num_training_files = min(len(file_list), self.beta)
+        num_training_files = min(len(file_list) * self.kappa, self.gamma)
         training_segments = []
         total_rows = 0
 
@@ -84,10 +79,10 @@ class SVDFingerprinter:
         np.random.shuffle(file_list)
 
         for file_path in tqdm(file_list, total=num_training_files):
-            # Only allow a max of beta rows
-            rows_remaining = self.beta - total_rows
+            # Only allow a max of gamma rows
+            rows_remaining = self.gamma - total_rows
             if rows_remaining <= 0:
-                print(f"Reached the limit of beta={self.beta} training segments.")
+                print(f"Reached the limit of gamma={self.gamma} training segments.")
                 break
 
             # Select only a maximum of kappa segments
@@ -101,7 +96,7 @@ class SVDFingerprinter:
             training_segments.append(spectrogram)
             total_rows += spectrogram.shape[0]
 
-        # Vertically stack all segments: (beta, F)
+        # Vertically stack all segments: (gamma, B)
         T = np.vstack(training_segments)
 
         print(f"Fitting model on training matrix with shape: {T.shape}...")
@@ -114,7 +109,7 @@ class SVDFingerprinter:
     def get_fingerprint(self, file_path: str) -> np.ndarray:
         """
         Generates a fingerprint using the configured model and strategy.
-        Returns: np.ndarray: Low-rank matrix (M, r).
+        Returns: np.ndarray: Low-rank matrix (M, phi).
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before fingerprinting.")
@@ -148,5 +143,5 @@ class SVDFingerprinter:
         plt.show()
 
     def __compute_spectrogram(self, file_path: str) -> np.ndarray:
-        return compute_spectrogram(file_path, f_s=self.f_s, L=self.L, H=self.H, F=self.F, tau=self.tau,
+        return compute_spectrogram(file_path, f_s=self.f_s, L=self.L, H=self.H, B=self.B, tau=self.tau,
                                    window_type=self.window_type)

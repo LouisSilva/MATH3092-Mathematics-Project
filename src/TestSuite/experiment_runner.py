@@ -9,98 +9,24 @@ import time
 import numpy as np
 import pandas as pd
 import soundfile as sf
-from enum import Enum
-from abc import ABC, abstractmethod
 from tqdm import tqdm
-from dataclasses import dataclass
 from typing import Any
 
+from .test_cases import AudioTestCase
+from .test_config import TestConfig
+from .test_status import TestStatus
+from .test_type import TestType
 
-from spectrogram_generation import load_audio
-from fingerprint_database import FingerprintDatabase
+from ..spectrogram_generation import load_audio
+from ..fingerprint_database import FingerprintDatabase
 
 def random_suffix(length=8):
     alphabet = string.ascii_lowercase + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
-
 def sanitize_filename(text: str) -> str:
     """Removes special characters from a string to make it safe for filenames."""
     return re.sub(r'[^\w\-. ]', '_', text)
-
-
-@dataclass
-class TestConfig:
-    """Configuration for an evaluation experiment."""
-    f_s: int = 22050
-    snippet_duration_sec: float = 4.0
-    match_threshold: float = 0.3
-    n_db_tracks: int = 100
-    n_query_tracks: int = 20
-    random_seed: int = 42
-    save_passed_queries: bool = True
-    save_failed_queries: bool = True
-    temp_dir: str = "temp_queries"
-
-
-class AudioTestCase(ABC):
-    """Abstract base class for a test case."""
-
-    def __init__(self, **kwargs):
-        self.params = kwargs
-
-    def __str__(self) -> str:
-        params_str = ", ".join(f"{k}={v}" for k, v in self.params.items())
-        return f"{self.__class__.__name__}({params_str})"
-
-    @abstractmethod
-    def apply(self, audio: np.ndarray, sr: int) -> np.ndarray:
-        """Applies the distortion to the audio signal."""
-        pass
-
-
-class CleanTrack(AudioTestCase):
-    """Control case: No distortion is applied."""
-
-    def apply(self, audio: np.ndarray, sr: int) -> np.ndarray:
-        return audio
-
-class WhiteNoise(AudioTestCase):
-    """Adds Gaussian white noise to the signal."""
-
-    def __init__(self, amplitude: float = 0.05):
-        super().__init__(amplitude=amplitude)
-
-    def apply(self, audio: np.ndarray, sr: int) -> np.ndarray:
-        noise = np.random.normal(0, 1, size=audio.shape[0]).astype(audio.dtype)
-        return audio + (self.params['amplitude'] * noise)
-
-class PitchShift(AudioTestCase):
-    """Shifts the pitch of the audio."""
-
-    def __init__(self, n_steps: float = 1.5):
-        super().__init__(n_steps=n_steps)
-
-    def apply(self, audio: np.ndarray, sr: int) -> np.ndarray:
-        return librosa.effects.pitch_shift(y=audio, sr=sr, n_steps=self.params['n_steps'])
-
-
-class TestType(Enum):
-    POSITIVE = "Positive"  # Query is in the DB
-    NEGATIVE = "Negative"  # Query is NOT in the DB (Alien)
-
-    def __str__(self):
-        return self.value
-
-
-class TestStatus(Enum):
-    PASS = "PASS"
-    FAIL = "FAIL"
-    ERROR = "ERROR"
-
-    def __str__(self):
-        return self.value
-
 
 class ExperimentRunner:
     def __init__(self, fingerprinter, search_strategy, all_filepaths: list[str], config: TestConfig):
@@ -231,16 +157,14 @@ class ExperimentRunner:
             if os.path.exists(temp_file_path):
                 status = result_entry["Status"]
 
-                # Logic: Move if config enabled for that status, otherwise delete
+                # Move if config enabled for that status, otherwise delete
                 if status == TestStatus.PASS and self.config.save_passed_queries:
                     shutil.move(temp_file_path, os.path.join(self.passed_dir, temp_filename))
-                    saved = True
 
                 elif (status == TestStatus.FAIL or status == TestStatus.ERROR) and self.config.save_failed_queries:
-                    # For now, we only care about the positive test types
+                    # We only care about the positive test types
                     if test_type == TestType.POSITIVE:
                         shutil.move(temp_file_path, os.path.join(self.failed_dir, temp_filename))
-                        saved = True
 
                 else:
                     os.remove(temp_file_path)
@@ -304,7 +228,7 @@ class ExperimentRunner:
                     'nan')
 
                 print(f"Positive Queries: {len(pos_group)}")
-                print(f"Raw Top-1 Accuracy: {raw_accuracy:.2f}% (Found correct ID)")
+                print(f"Top-1 Accuracy: {raw_accuracy:.2f}% (Found correct ID)")
                 print(f"Verified Pass Rate: {verified_accuracy:.2f}% (Correct ID + Dist < Threshold)")
                 print(f"Avg Distance (Match): {avg_match_dist:.4f}")
                 print(f"Avg Distance (Wrong): {avg_mismatch_dist:.4f}")
