@@ -42,29 +42,10 @@ def encpowerof2(val):
     return int(np.ceil(np.log(max(1, val)) / np.log(2)))
 
 
-def locmax(vec, indices=False):
-    """ Return a boolean vector of which points in vec are local maxima.
-        End points are peaks if larger than single neighbors.
-        if indices=True, return the indices of the True values instead
-        of the boolean vector. (originally from audfprint.py)
-    """
-    # x[-1]-1 means last value can be a peak
-    # nbr = np.greater_equal(np.r_[x, x[-1]-1], np.r_[x[0], x])
-    # the np.r_ was killing us, so try an optimization...
-    nbr = np.zeros(len(vec) + 1, dtype=bool)
-    nbr[0] = True
-    nbr[1:-1] = np.greater_equal(vec[1:], vec[:-1])
-    maxmask = (nbr[:-1] & ~nbr[1:])
-    if indices:
-        return np.nonzero(maxmask)[0]
-    else:
-        return maxmask
-
-
 def keep_local_maxes(vec):
     """ Zero out values unless they are local maxima."""
     local_maxes = np.zeros(vec.shape)
-    locmaxindices = locmax(vec, indices=True)
+    locmaxindices = audfprint_analyze.locmax(vec, indices=True)
     local_maxes[locmaxindices] = vec[locmaxindices]
     return local_maxes
 
@@ -78,7 +59,7 @@ def find_modes(data, threshold=5, window=0):
     datamin = np.amin(data)
     fullvector = np.bincount(data - datamin)
     # Find local maxima
-    localmaxes = np.nonzero(np.logical_and(locmax(fullvector),
+    localmaxes = np.nonzero(np.logical_and(audfprint_analyze.locmax(fullvector),
                                            np.greater_equal(fullvector,
                                                             threshold)))[0]
     return localmaxes + datamin, fullvector[localmaxes]
@@ -429,9 +410,16 @@ class Matcher(object):
         # spectrogram enhancement
         if self.illustrate_hpf:
             HPF_POLE = 0.98
-            sgram = np.array([scipy.signal.lfilter([1, -1],
-                                                   [1, -HPF_POLE], s_row)
-                              for s_row in sgram])[:-1,]
+            # sgram = np.array([scipy.signal.lfilter([1, -1],
+            #                                        [1, -HPF_POLE], s_row)
+            #                   for s_row in sgram])[:-1,]
+
+            # Use the axis parameter of lfilter to apply the filter to all frequency bins in one call.
+            # This avoids calling lfilter many times.
+            sgram = scipy.signal.lfilter([1, -1],
+                                         [1, -HPF_POLE],
+                                         sgram, axis=1)[:-1]
+
         sgram = sgram - np.max(sgram)
         librosa.display.specshow(sgram, sr=sr, hop_length=analyzer.n_hop,
                                  y_axis='linear', x_axis='time',

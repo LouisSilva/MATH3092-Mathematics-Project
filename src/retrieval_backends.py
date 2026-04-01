@@ -279,4 +279,4 @@ class ShazamRetrievalBackend(RetrievalBackend):
         if result.predicted_track_id is None:
             return False
 
-        return result.score <= self.confident_match_threshold
+        return result.score >= self.confident_match_threshold

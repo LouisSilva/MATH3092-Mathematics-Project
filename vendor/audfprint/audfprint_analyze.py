@@ -187,12 +187,17 @@ class Analyzer(object):
             # Need to calculate new vector
             self.__sp_width = width
             self.__sp_len = npoints
-            self.__sp_vals = np.exp(-0.5 * ((np.arange(-npoints, npoints + 1)
-                                             / width) ** 2))
+            self.__sp_vals = np.exp(-0.5 * ((np.arange(-npoints, npoints + 1) / width) ** 2))
+
         # Now the actual function
         for pos, val in peaks:
-            vec = np.maximum(vec, val * self.__sp_vals[np.arange(npoints)
-                                                       + npoints - pos])
+            # vec = np.maximum(vec, val * self.__sp_vals[np.arange(npoints) + npoints - pos])
+
+            # Use the out parameter to avoid allocating stuff to vec every iteration
+            start = npoints - pos
+            end = 2 * npoints - pos
+            np.maximum(vec, val * self.__sp_vals[start:end], out=vec)
+
         return vec
 
     def _decaying_threshold_fwd_prune(self, sgram, a_dec):
@@ -287,23 +292,39 @@ class Analyzer(object):
             # The sgram is identically zero, i.e., the input signal was identically
             # zero.  Not good, but let's let it through for now.
             print("find_peaks: Warning: input signal is identically zero.")
+
         # High-pass filter onset emphasis
         # [:-1,] discards top bin (nyquist) of sgram so bins fit in 8 bits
-        sgram = np.array([scipy.signal.lfilter([1, -1],
-                                               [1, -HPF_POLE ** (1 / OVERSAMP)], s_row)
-                          for s_row in sgram])[:-1,]
-        # Prune to keep only local maxima in spectrum that appear above an online,
-        # decaying threshold
+        # sgram = np.array([scipy.signal.lfilter([1, -1],
+        #                                        [1, -HPF_POLE ** (1 / OVERSAMP)], s_row)
+        #                   for s_row in sgram])[:-1,]
+
+        # Use the axis parameter of lfilter to apply the filter to all frequency bins in one call.
+        # This avoids calling lfilter many times.
+        sgram = scipy.signal.lfilter([1, -1],
+                                     [1, -HPF_POLE ** (1 / OVERSAMP)],
+                                     sgram, axis=1)[:-1]
+
+        # Prune to keep only local maxima in spectrum that appear above an online, decaying threshold
         peaks = self._decaying_threshold_fwd_prune(sgram, a_dec)
-        # Further prune these peaks working backwards in time, to remove small peaks
-        # that are closely followed by a large peak
+
+        # Further prune these peaks working backwards in time, to remove small peaks that are closely followed by a large peak
         peaks = self._decaying_threshold_bwd_prune_peaks(sgram, peaks, a_dec)
-        # build a list of peaks we ended up with
+
+        # Build a list of peaks we ended up with
         scols = np.shape(sgram)[1]
-        pklist = []
-        for col in range(scols):
-            for bin_ in np.nonzero(peaks[:, col])[0]:
-                pklist.append((col, bin_))
+
+        # pklist = []
+        # for col in range(scols):
+        #     for bin_ in np.nonzero(peaks[:, col])[0]:
+        #         pklist.append((col, bin_))
+
+        # Use np.argwhere to get all peak coordinates at once, then sort by column (since the original order expects time‑sorted peaks).
+        # This avoids using nested loops over columns and peaks.
+        pklist = np.argwhere(peaks)
+        pklist = pklist[np.argsort(pklist[:, 1])]
+        pklist = [(col, bin_) for bin_, col in pklist]
+
         return pklist
 
     def peaks2landmarks(self, pklist):
@@ -411,15 +432,18 @@ class Analyzer(object):
                 query_hashes = landmarks2hashes(self.peaks2landmarks(peaks))
 
             # Remove duplicates by merging each row into a single value.
-            hashes_hashes = (((query_hashes[:, 0].astype(np.uint64)) << 32)
-                             + query_hashes[:, 1].astype(np.uint64))
-            unique_hash_hash = np.sort(np.unique(hashes_hashes))
-            unique_hashes = np.hstack([
-                (unique_hash_hash >> 32)[:, np.newaxis],
-                (unique_hash_hash & ((1 << 32) - 1))[:, np.newaxis]
-            ]).astype(np.int32)
-            hashes = unique_hashes
+            # hashes_hashes = (((query_hashes[:, 0].astype(np.uint64)) << 32)
+            #                  + query_hashes[:, 1].astype(np.uint64))
+            # unique_hash_hash = np.sort(np.unique(hashes_hashes))
+            # unique_hashes = np.hstack([
+            #     (unique_hash_hash >> 32)[:, np.newaxis],
+            #     (unique_hash_hash & ((1 << 32) - 1))[:, np.newaxis]
+            # ]).astype(np.int32)
             # Or simply np.unique(query_hashes, axis=0) for numpy >= 1.13
+
+            # I do indeed have numpy >= 1.13, so:
+            unique_hashes = np.unique(query_hashes, axis=0).astype(np.int32)
+            hashes = unique_hashes
 
         # print("wavfile2hashes: read", len(hashes), "hashes from", filename)
         return hashes
