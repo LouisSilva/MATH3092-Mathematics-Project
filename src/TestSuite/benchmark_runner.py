@@ -45,6 +45,7 @@ class BenchmarkRunner:
         self.db_tracks: list[str] = []
         self.query_tracks: list[str] = []
         self.alien_tracks: list[str] = []
+        self.query_offsets: dict[str, float] = {}
         self.results: BenchmarkReport = BenchmarkReport()
         self.rng = np.random.default_rng(self.config.random_seed)
 
@@ -68,7 +69,8 @@ class BenchmarkRunner:
         n_db = self.config.n_db_tracks
         n_query = self.config.n_query_tracks
 
-        if n_db + (n_query * 2) > n_total:
+        # if n_db + (n_query * 2) > n_total:
+        if n_db + n_query > n_total:
             # We need enough for DB + Positive Queries + Negative Queries (Aliens)
             raise ValueError(f"Not enough tracks! Need {n_db + 2 * n_query}, but have {n_total}.")
 
@@ -86,6 +88,11 @@ class BenchmarkRunner:
         # Select Alien/Negative Queries (Tracks NOT in DB)
         alien_indices = shuffled_indices[n_db: n_db + n_query]
         self.alien_tracks = [self.all_filepaths[i] for i in alien_indices]
+
+        for path in self.query_tracks + self.alien_tracks:
+            full_duration = librosa.get_duration(path=path)
+            max_offset = max(0.0, full_duration - self.config.snippet_duration_sec)
+            self.query_offsets[path] = float(self.rng.uniform(0.0, max_offset))
 
         print(f"Selected {len(self.db_tracks)} tracks for database.")
         print(f"Selected {len(self.query_tracks)} tracks for positive queries.")
@@ -132,19 +139,16 @@ class BenchmarkRunner:
 
         try:
             # Load audio and select a random snippet
-            full_duration = librosa.get_duration(path=query_path)
-            max_offset = max(0, math.floor(full_duration - self.config.snippet_duration_sec))
-            offset = self.rng.uniform(0, max_offset)
 
             audio_snippet, sr = load_audio(
                 query_path,
                 f_s=self.config.f_s,
-                offset=offset,
+                offset=self.query_offsets[query_path],
                 duration=self.config.snippet_duration_sec
             )
 
             # Apply some function to the audio (e.g. add white noise, distortion, reverb, etc.)
-            distorted_audio = test_case.apply(audio_snippet, sr)
+            distorted_audio = test_case.apply(audio_snippet, sr, self.rng)
 
             # Write to a temp file
             sf.write(temp_file_path, distorted_audio, sr)
