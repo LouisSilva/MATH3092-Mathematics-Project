@@ -2,46 +2,50 @@
 import os
 import re
 import secrets
-import string
-import librosa
 import shutil
+import string
 import time
+
+import librosa
 import numpy as np
 import pandas as pd
 import soundfile as sf
 from tqdm import tqdm
-from typing import Any
 
+from .data_structures import TestType, TestStatus, MatchOutcome, BenchmarkTrial, BenchmarkConfig, BenchmarkReport
 from .test_cases import AudioTestCase
-from .test_config import TestConfig
-from .test_status import TestStatus
-from .test_type import TestType
+from ..retrieval_backends import RetrievalBackend
+from ..EigenSpectraFingerprinter.spectrogram_generation import load_audio
 
-from ..spectrogram_generation import load_audio
-from ..fingerprint_database import FingerprintDatabase
 
 def random_suffix(length=8):
     alphabet = string.ascii_lowercase + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
 
+
 def sanitize_filename(text: str) -> str:
     """Removes special characters from a string to make it safe for filenames."""
     return re.sub(r'[^\w\-. ]', '_', text)
 
-class ExperimentRunner:
-    def __init__(self, fingerprinter, search_strategy, all_filepaths: list[str], config: TestConfig):
+
+class BenchmarkRunner:
+    def __init__(
+            self,
+            backend: RetrievalBackend,
+            config: BenchmarkConfig,
+            all_filepaths: list[str],
+    ):
         if not all_filepaths:
             raise ValueError("File path list cannot be empty.")
 
-        self.fingerprinter = fingerprinter
-        self.search_strategy = search_strategy
-        self.all_filepaths = all_filepaths
+        self.backend = backend
         self.config = config
-        self.db: FingerprintDatabase | None = None
+        self.all_filepaths = all_filepaths
+
         self.db_tracks: list[str] = []
         self.query_tracks: list[str] = []
         self.alien_tracks: list[str] = []
-        self.results: list[dict[str, Any]] = []
+        self.results: BenchmarkReport = BenchmarkReport()
         self.rng = np.random.default_rng(self.config.random_seed)
 
         # Ensure base temp dir exists
@@ -57,7 +61,7 @@ class ExperimentRunner:
         if self.config.save_failed_queries:
             os.makedirs(self.failed_dir, exist_ok=True)
 
-    def setup_database(self):
+    def setup_database(self) -> None:
         """Selects tracks for DB and queries, then populates the database."""
         print("--- Setting up database ---")
         n_total = len(self.all_filepaths)
@@ -87,25 +91,41 @@ class ExperimentRunner:
         print(f"Selected {len(self.query_tracks)} tracks for positive queries.")
         print(f"Selected {len(self.alien_tracks)} tracks for negative/alien queries.")
 
-        self.db = FingerprintDatabase(self.fingerprinter, self.search_strategy)
-        self.db.add_tracks(self.db_tracks)
-        print("--- Database setup complete ---")
+        self.backend.add_tracks(self.db_tracks)
+        print("Database setup complete")
 
-    def _run_single_query(self, query_path: str, test_case: AudioTestCase, test_type: TestType) -> dict[str, Any]:
-        """Processes a single audio file query."""
-        if self.db is None:
-            raise RuntimeError("Database not set up. Call setup_database() first.")
+    def train(self, training_filepaths: list[str]) -> None:
+        print(f"Training backend on {len(training_filepaths)} files.")
+        self.backend.train(training_filepaths)
 
+    def _initial_score_value(self) -> float:
+        return 0.0 if self.backend.higher_is_better else float("inf")
+
+    def _run_single_query(
+            self,
+            query_path: str,
+            test_case: AudioTestCase,
+            test_type: TestType
+    ) -> BenchmarkTrial:
+        """Processes one audio file query."""
         target_id = os.path.basename(query_path)
-        result_entry = {
-            "Test Case": str(test_case),
-            "Test Type": test_type,
-            "Target ID": target_id,
-            "Predicted ID": None,
-            "Distance": float('inf'),
-            "Query Time (s)": 0.0,
-            "Status": TestStatus.ERROR
-        }
+
+        match_outcome = MatchOutcome(
+            predicted_track_id=None,
+            score=self._initial_score_value(),
+            score_name=self.backend.score_name,
+            higher_is_better=self.backend.higher_is_better,
+            metadata={},
+        )
+
+        benchmark_trial = BenchmarkTrial(
+            test_case=str(test_case),
+            test_type=test_type,
+            target_track_id=target_id,
+            match_outcome=match_outcome,
+            query_time_s=0.0,
+            status=TestStatus.ERROR,
+        )
 
         temp_filename = f"{test_type}_{sanitize_filename(str(test_case))}_{sanitize_filename(target_id)}.wav"
         temp_file_path = os.path.join(self.config.temp_dir, temp_filename)
@@ -131,37 +151,37 @@ class ExperimentRunner:
 
             # Run the search algorithm and record how much time it takes
             start_time = time.perf_counter()
-            predicted_id, dist = self.db.search(temp_file_path)
+            match_outcome: MatchOutcome = self.backend.search(temp_file_path)
             end_time = time.perf_counter()
 
             # Record the results
-            result_entry["Predicted ID"] = predicted_id
-            result_entry["Distance"] = dist
-            result_entry["Query Time (s)"] = end_time - start_time
+            benchmark_trial.query_time_s = end_time - start_time
+            benchmark_trial.match_outcome = match_outcome
+
+            is_confident = self.backend.is_confident_match(match_outcome)
 
             # Process the different test types
             if test_type == TestType.POSITIVE:
-                is_match = (predicted_id == target_id)
-                is_confident = (dist <= self.config.match_threshold)
-                result_entry["Status"] = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
+                is_match = match_outcome.predicted_track_id == target_id
+                benchmark_trial.status = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
 
             elif test_type == TestType.NEGATIVE:
-                result_entry["Status"] = TestStatus.PASS if dist > self.config.match_threshold else TestStatus.FAIL
+                benchmark_trial.status = TestStatus.PASS if not is_confident else TestStatus.FAIL
 
         except Exception as e:
             print(f"Error processing {query_path}: {e}")
-            result_entry["Status"] = TestStatus.ERROR
+            benchmark_trial.status = TestStatus.ERROR
 
         finally:
             # Cleanup the temp files
             if os.path.exists(temp_file_path):
-                status = result_entry["Status"]
 
                 # Move if config enabled for that status, otherwise delete
-                if status == TestStatus.PASS and self.config.save_passed_queries:
+                if benchmark_trial.status == TestStatus.PASS and self.config.save_passed_queries:
                     shutil.move(temp_file_path, os.path.join(self.passed_dir, temp_filename))
 
-                elif (status == TestStatus.FAIL or status == TestStatus.ERROR) and self.config.save_failed_queries:
+                elif (
+                        benchmark_trial.status == TestStatus.FAIL or benchmark_trial.status == TestStatus.ERROR) and self.config.save_failed_queries:
                     # We only care about the positive test types
                     if test_type == TestType.POSITIVE:
                         shutil.move(temp_file_path, os.path.join(self.failed_dir, temp_filename))
@@ -169,13 +189,10 @@ class ExperimentRunner:
                 else:
                     os.remove(temp_file_path)
 
-        return result_entry
+        return benchmark_trial
 
-    def run_experiment(self, test_cases: list[AudioTestCase]):
-        """Runs the evaluation across all specified test cases."""
-        if not self.db:
-            raise RuntimeError("Database not set up. Call setup_database() first.")
-
+    def run_experiment(self, test_cases: list[AudioTestCase]) -> None:
+        """Runs all the specified test cases."""
         for case in test_cases:
             print(f"\n--- Running Test Case: {case} ---")
 
@@ -187,58 +204,16 @@ class ExperimentRunner:
 
             all_tasks = positive_tasks + negative_tasks
             for task in tqdm(all_tasks, desc=f"Querying ({str(case)})"):
-                self.results.append(self._run_single_query(*task))
+                self.results.add(self._run_single_query(*task))
 
     def get_results_df(self) -> pd.DataFrame:
         """Returns the collected results as a pandas DataFrame."""
-        if not self.results: return pd.DataFrame()
-        return pd.DataFrame(self.results)
+        return self.results.to_dataframe()
 
-    def summarize_results(self, results_df: pd.DataFrame):
+    def summarize_results(self) -> None:
         """Prints a detailed summary of the experiment results."""
-        if results_df.empty:
-            print("No results to summarize.")
-            return
-
-        print("\n--- Experiment Summary ---")
-
-        for test_case_name, group in results_df.groupby('Test Case'):
-            print(f"\n--- Results for: {test_case_name} ---")
-
-            pos_group = group[group['Test Type'] == TestType.POSITIVE]
-            neg_group = group[group['Test Type'] == TestType.NEGATIVE]
-
-            # Positive Control Metrics
-            if not pos_group.empty:
-                # Raw Identification Accuracy (Ignoring Threshold)
-                raw_hits = (pos_group['Predicted ID'] == pos_group['Target ID'])
-                raw_accuracy = raw_hits.mean() * 100
-
-                # Verified Accuracy (Using Threshold)
-                verified_accuracy = (pos_group['Status'] == TestStatus.PASS).mean() * 100
-
-                avg_time = pos_group['Query Time (s)'].mean()
-
-                # Distances for Correct IDs vs Incorrect IDs
-                correct_matches = pos_group[raw_hits]
-                incorrect_matches = pos_group[~raw_hits]
-
-                avg_match_dist = correct_matches['Distance'].mean() if not correct_matches.empty else float('nan')
-                avg_mismatch_dist = incorrect_matches['Distance'].mean() if not incorrect_matches.empty else float(
-                    'nan')
-
-                print(f"Positive Queries: {len(pos_group)}")
-                print(f"Top-1 Accuracy: {raw_accuracy:.2f}% (Found correct ID)")
-                print(f"Verified Pass Rate: {verified_accuracy:.2f}% (Correct ID + Dist < Threshold)")
-                print(f"Avg Distance (Match): {avg_match_dist:.4f}")
-                print(f"Avg Distance (Wrong): {avg_mismatch_dist:.4f}")
-                print(f"Avg Query Time: {avg_time:.4f}s")
-
-            # Negative Control Metrics
-            if not neg_group.empty:
-                true_negative_rate = (neg_group['Status'] == TestStatus.PASS).mean() * 100
-                avg_rejection_dist = neg_group['Distance'].mean()
-
-                print(f"Negative Queries: {len(neg_group)}")
-                print(f"True Negative Rate: {true_negative_rate:.2f}% (Correctly Rejected)")
-                print(f"Avg Rejection Dist: {avg_rejection_dist:.4f}")
+        self.results.print_summary(
+            score_name=self.backend.score_name,
+            higher_is_better=self.backend.higher_is_better,
+            decision_rule=self.backend.decision_rule,
+        )

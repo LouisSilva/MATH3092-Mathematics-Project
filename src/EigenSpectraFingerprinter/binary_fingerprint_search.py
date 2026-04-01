@@ -1,19 +1,15 @@
 ﻿import numpy as np
-import os
 from abc import ABC, abstractmethod
-from tqdm import tqdm
-import scipy
+from scipy.signal import convolve
 
-from .fingerprinter import SVDFingerprinter
-
-class SearchStrategy(ABC):
+class FingerprintSearchStrategy(ABC):
     """An interface for searching a query fingerprint in a database."""
 
     @abstractmethod
     def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         pass
 
-class HammingSearch(SearchStrategy):
+class HammingSearch(FingerprintSearchStrategy):
     """
     Searches using a sliding window with Hamming distance.
     Use with binary fingerprints.
@@ -61,7 +57,7 @@ class HammingSearch(SearchStrategy):
 
         return best_track, normalized_min_dist
 
-class FFTConvolveSearch(SearchStrategy):
+class FFTConvolveSearch(FingerprintSearchStrategy):
     """
     Extremely fast search using 1D FFT Convolution.
     Flattens the 2D fingerprints and computes correlation in one go.
@@ -97,10 +93,9 @@ class FFTConvolveSearch(SearchStrategy):
 
             # FFT Convolution
             # mode='valid' returns only overlaps where query fits inside track
-            correlation = scipy.signal.convolve(track_flat, query_flat, mode='valid', method='fft')
+            correlation = convolve(track_flat, query_flat, mode='valid', method='fft')
 
-            # Extract Valid Alignments
-            # Because we flattened, 'valid' convolution produces results for shifts of 1 element, 2 elements, etc.
+            # Extract valid alignments. Because we flattened, 'valid' convolution produces results for shifts of 1 element, 2 elements, etc.
             # We only care about shifts of exactly F (one whole time step).
             # We take every F-th element.
             valid_correlations = correlation[::F]
@@ -118,30 +113,3 @@ class FFTConvolveSearch(SearchStrategy):
                 best_track = track_id
 
         return best_track, best_dist
-
-class FingerprintDatabase:
-    def __init__(self, fingerprinter: SVDFingerprinter, search_strategy: SearchStrategy):
-        self.fingerprinter = fingerprinter
-        self.search_strategy = search_strategy
-        self.db: dict[str, np.ndarray] = {}
-
-    def add_tracks(self, track_files: list[str]):
-        print(f"Indexing {len(track_files)} tracks...")
-
-        for file_path in tqdm(track_files, total=len(track_files)):
-            try:
-                fingerprint = self.fingerprinter.get_fingerprint(file_path)
-                track_id = os.path.basename(file_path)
-                self.db[track_id] = fingerprint
-
-            except Exception as e:
-                print(f"Skipping {file_path}: {e}")
-
-    def search(self, query_path: str) -> tuple[str | None, float]:
-        """
-        Searches for the query in the database using the configured search strategy.
-
-        Returns: (best_match_id, min_distance)
-        """
-        query_fingerprint = self.fingerprinter.get_fingerprint(query_path)
-        return self.search_strategy.search(query_fingerprint, self.db)
