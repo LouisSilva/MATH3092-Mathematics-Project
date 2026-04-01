@@ -72,11 +72,13 @@ class FFTConvolveSearch(SearchStrategy):
         Q, F = query_fingerprint.shape
         total_bits = Q * F
 
-        # 1. Pre-process Query
+        # Pre-process Query
         # Convert {0, 1} -> {-1, 1}
         query_bipolar = 2 * query_fingerprint.astype(np.float32) - 1
+
         # FLATTEN to 1D
         query_flat = query_bipolar.flatten()
+
         # REVERSE for convolution -> correlation equivalence
         query_flat = query_flat[::-1]
 
@@ -89,18 +91,16 @@ class FFTConvolveSearch(SearchStrategy):
             if Q > T:
                 continue
 
-            # 2. Pre-process Track
+            # Pre-process Track
             track_bipolar = 2 * track_fingerprint.astype(np.float32) - 1
             track_flat = track_bipolar.flatten()
 
-            # 3. FFT Convolution (The Magic Speedup)
-            # method='fft' is mandatory for speed on large arrays
+            # FFT Convolution
             # mode='valid' returns only overlaps where query fits inside track
             correlation = scipy.signal.convolve(track_flat, query_flat, mode='valid', method='fft')
 
-            # 4. Extract Valid Alignments
-            # Because we flattened, 'valid' convolution produces results for
-            # shifts of 1 element, 2 elements, etc.
+            # Extract Valid Alignments
+            # Because we flattened, 'valid' convolution produces results for shifts of 1 element, 2 elements, etc.
             # We only care about shifts of exactly F (one whole time step).
             # We take every F-th element.
             valid_correlations = correlation[::F]
@@ -108,7 +108,7 @@ class FFTConvolveSearch(SearchStrategy):
             if valid_correlations.size == 0:
                 continue
 
-            # 5. Calculate Distances
+            # Calculate Distances
             max_corr = np.max(valid_correlations)
             min_hamming_dist = (total_bits - max_corr) / 2.0
             normalized_dist = min_hamming_dist / total_bits

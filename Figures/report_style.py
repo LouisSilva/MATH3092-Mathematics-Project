@@ -284,85 +284,6 @@ def generate_figure_3_stft_partitioning():
     save_figure(fig, "stft_partitioning", ext="pdf")
 
 
-def generate_figure_3_stft_partitioning2():
-    set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.6)
-
-    fs = 20.0
-    duration = 2.0
-    N_total = int(duration * fs) + 1
-    ts = np.linspace(0, duration, N_total)
-    xn = np.sin(2 * np.pi * 1.2 * ts) + 0.4 * np.cos(2 * np.pi * 3.5 * ts)
-
-    t = np.linspace(0, duration, 1000)
-    xt = np.sin(2 * np.pi * 1.2 * t) + 0.4 * np.cos(2 * np.pi * 3.5 * t)
-
-    L, H = 12, 4
-    M = 1 + (N_total - L) // H
-    m_hl = 1
-    start_idx, end_idx = m_hl * H, m_hl * H + L
-
-    fig, (ax1, ax2) = plt.subplots(2, 1, sharex=True, gridspec_kw={'height_ratios': [2.5, 1.5]})
-    fig.subplots_adjust(top=0.78, hspace=0.1)
-
-    # Top Plot
-    ax1.spines['top'].set_visible(False)
-    ax1.spines['right'].set_visible(False)
-    ax1.spines['bottom'].set_visible(False)
-    ax1.grid(True, alpha=0.3, color=PLOT_CFG['tertiary'], linestyle='--')
-    ax1.tick_params(axis='x', which='both', bottom=False, labelbottom=False)
-
-    ax1.plot(t, xt, lw=2, color=PLOT_CFG['primary'], alpha=0.7, label=r"$x(t)$", zorder=1)
-
-    ax1.scatter(ts, xn, s=25, linewidth=0.8, color=PLOT_CFG['secondary'], edgecolor="white", zorder=3, label=r"$x[n]$")
-
-    ax1.scatter(ts[start_idx:end_idx], xn[start_idx:end_idx], s=45, linewidth=1,
-                color=PLOT_CFG['highlight'], edgecolor="white", zorder=4, label=fr"Segment $m={m_hl}$")
-
-    ax1.axvspan(ts[start_idx], ts[end_idx - 1], color=PLOT_CFG['highlight'], alpha=0.1, zorder=0)
-    ax1.set_ylabel("Amplitude", fontsize=12)
-
-    fig.suptitle("STFT Signal Partitioning", y=1.02, fontsize=14)
-    # ax1.set_title(fr"$N={N_total}$ total samples $\quad \vert \quad$ $L={L}$ samples per segment $\quad \vert \quad$ $H={H}$ hop size", pad=40, fontsize=12)
-
-    ax1.legend(loc="lower center", bbox_to_anchor=(0.5, 1.0), ncol=3, frameon=False, fontsize=11)
-
-    # Bottom Plot
-    ax2.spines['top'].set_visible(False)
-    ax2.spines['right'].set_visible(False)
-    ax2.spines['left'].set_visible(False)
-    ax2.grid(True, alpha=0.3, color=PLOT_CFG['tertiary'], axis='x', linestyle='--')
-
-    for m in range(min(M, 6)):
-        n_start, n_end = m * H, m * H + L - 1
-        t_start, t_end = ts[n_start], ts[n_end]
-        color = PLOT_CFG['highlight'] if m == m_hl else PLOT_CFG['gray_bar']
-        alpha = 0.9 if m == m_hl else 0.5
-        ax2.hlines(y=-m, xmin=t_start, xmax=t_end, color=color, alpha=alpha, linewidth=8)
-        ax2.text(t_start - 0.03, -m, f"$m={m}$", va='center', ha='right', fontsize=11, color=color,
-                 fontweight='bold' if m == m_hl else 'normal')
-        if m == m_hl:
-            ax2.text(t_end + 0.03, -m, r"$\leftarrow x[n + mR]$ for $n \in [0, L-1]$", va='center', ha='left',
-                     color=color, fontsize=11)
-
-    ax2.annotate("", xy=(ts[0], 0.6), xytext=(ts[L - 1], 0.6),
-                 arrowprops=dict(arrowstyle="<->", color="black", shrinkA=0, shrinkB=0))
-    ax2.text(ts[L // 2], 0.8, f"$L={L}$", ha='center', va='bottom', fontsize=11)
-
-    t_end_m0, t_end_m1 = ts[L - 1], ts[L - 1 + H]
-    ax2.annotate("", xy=(t_end_m0, -0.4), xytext=(t_end_m1, -0.4),
-                 arrowprops=dict(arrowstyle="<->", color="black", shrinkA=0, shrinkB=0))
-    ax2.text((t_end_m0 + t_end_m1) / 2, -0.2, f"$H={H}$", ha='center', va='bottom', fontsize=11)
-
-    ax2.set_yticks([])
-    ax2.set_ylim(-5.5, 1.5)
-    ax2.set_xlabel("Time (seconds)")
-
-    plt.xlim(-0.15, duration + 0.05)
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.88, hspace=0.05)
-    save_figure(fig, "stft_partitioning2", ext="png")
-
-
 def generate_spectrogram_figure(y, sr, title, filename_prefix):
     set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.5, dpi=300)
 
@@ -389,18 +310,18 @@ def generate_figure_6_mel_mapping():
     plt.style.use("seaborn-v0_8-whitegrid")
 
     sample_rate = 44100
-    L, F = 2048, 20
+    L, B = 2048, 20
     q_min, q_max = 0.0, sample_rate / 2.0
 
     mel_min, mel_max = hz_to_mel(q_min), hz_to_mel(q_max)
-    mel_points = np.linspace(mel_min, mel_max, F + 2)
+    mel_points = np.linspace(mel_min, mel_max, B + 2)
     hz_points = mel_to_hz(mel_points)
 
     fig, ax = plt.subplots()
     freq_axis_fine = np.linspace(q_min, q_max, 2000)
     mel_axis_fine = hz_to_mel(freq_axis_fine)
 
-    i_mid = np.ceil(F // 1.5).astype(int)
+    i_mid = np.ceil(B // 1.5).astype(int)
     idx_triplet = [i_mid - 1, i_mid, i_mid + 1]
 
     for j in range(len(mel_points)):
@@ -453,16 +374,16 @@ def generate_figure_7_mel_filterbank():
     plt.style.use("seaborn-v0_8-whitegrid")
 
     sample_rate = 44100
-    L, F = 2048, 10
+    L, B = 2048, 10
     q_min, q_max = 0.0, sample_rate / 2.0
 
     mel_min, mel_max = hz_to_mel(q_min), hz_to_mel(q_max)
-    mel_points = np.linspace(mel_min, mel_max, F + 2)
+    mel_points = np.linspace(mel_min, mel_max, B + 2)
     hz_points = mel_to_hz(mel_points)
     fft_bins = np.floor((L + 1) * hz_points / sample_rate).astype(int)
 
-    filters = np.zeros((F, int(L / 2 + 1)))
-    for i in range(F):
+    filters = np.zeros((B, int(L / 2 + 1)))
+    for i in range(B):
         left, center, right = fft_bins[i], fft_bins[i + 1], fft_bins[i + 2]
         if center - left != 0:
             filters[i, left:center] = (np.arange(left, center) - left) / (center - left)
@@ -472,10 +393,10 @@ def generate_figure_7_mel_filterbank():
     fig, ax = plt.subplots()
     fft_freqs = np.linspace(q_min, q_max, int(L / 2 + 1))
 
-    highlight_i = math.ceil(F // 1.5)
+    highlight_i = math.ceil(B // 1.5)
     highlight_i_plus_2 = highlight_i + 2
 
-    for i in range(F):
+    for i in range(B):
         color = PLOT_CFG['primary'] if i == highlight_i else (
             PLOT_CFG['highlight'] if i == highlight_i_plus_2 else "#c7c7c7")
         lw, alpha = (2.8, 1.0) if i in [highlight_i, highlight_i_plus_2] else (1.1, 0.35)
@@ -484,7 +405,7 @@ def generate_figure_7_mel_filterbank():
         if i == highlight_i:
             highlight_line = line
 
-    for j in range(F + 2):
+    for j in range(B + 2):
         ax.axvline(hz_points[j], color="#d9d9d9", linestyle="--", linewidth=0.8, alpha=0.22, zorder=0)
 
     x_left, x_center, x_right = hz_points[highlight_i], hz_points[highlight_i + 1], hz_points[highlight_i + 2]
@@ -509,7 +430,7 @@ def generate_figure_7_mel_filterbank():
                     bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=0.12),
                     arrowprops=dict(arrowstyle="->", color="#555555", lw=0.8, shrinkA=2, shrinkB=3, alpha=0), zorder=6)
 
-    ax.annotate(rf"$F={F}$ triangular filters", xy=(0.985, 0.96), xycoords="axes fraction", ha="right", va="top",
+    ax.annotate(rf"$B={B}$ triangular filters", xy=(0.985, 0.96), xycoords="axes fraction", ha="right", va="top",
                 fontsize=9, bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=0.15), zorder=7)
 
     ax.set_xlabel("Frequency (Hz)")
@@ -530,7 +451,7 @@ def generate_figure_7_mel_filterbank():
     base_center_idx = highlight_i + 1
     valid_offsets, tick_bins = [], []
     for off in [-2, -1, 0, 1, 2, 3]:
-        if 1 <= base_center_idx + off <= F:
+        if 1 <= base_center_idx + off <= B:
             valid_offsets.append(off)
             tick_bins.append(fft_bins[base_center_idx + off])
 
