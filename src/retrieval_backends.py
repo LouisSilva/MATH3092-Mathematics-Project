@@ -4,7 +4,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 from src.TestSuite.data_structures import MatchOutcome
-
+from vendor.audfprint import audfprint_analyze, audfprint_match, hash_table
 
 class RetrievalBackend(ABC):
     """
@@ -155,17 +155,6 @@ class ShazamRetrievalBackend(RetrievalBackend):
         fail_on_error: bool = True,
         confident_match_threshold: int = 6,
     ):
-        try:
-            import audfprint_analyze
-            import audfprint_match
-            import hash_table
-        except ImportError as exc:
-            raise ImportError(
-                "ShazamRetrievalBackend requires the vendored audfprint sources "
-                "to be importable as flat modules: audfprint_analyze.py, "
-                "audfprint_match.py, hash_table.py, plus their dependencies."
-            ) from exc
-
         self._audfprint_analyze = audfprint_analyze
         self._audfprint_match = audfprint_match
         self._hash_table_module = hash_table
@@ -214,17 +203,25 @@ class ShazamRetrievalBackend(RetrievalBackend):
         print(f"Indexing {len(track_files)} tracks with Shazam backend...")
 
         for file_path in tqdm(track_files, total=len(track_files)):
-            try:
-                hashes = self.analyzer.wavfile2hashes(file_path)
-                track_id = os.path.basename(file_path)
+            hashes = self.analyzer.wavfile2hashes(file_path)
+            track_id = os.path.basename(file_path)
 
-                if len(hashes) == 0:
-                    print(f"Skipping {file_path}: no hashes extracted")
-                    continue
+            if len(hashes) == 0:
+                print(f"Skipping {file_path}: no hashes extracted")
+                continue
 
-                self.hash_table.store(track_id, hashes)
-            except Exception as e:
-                print(f"Skipping {file_path}: {e}")
+            self.hash_table.store(track_id, hashes)
+            # try:
+            #     hashes = self.analyzer.wavfile2hashes(file_path)
+            #     track_id = os.path.basename(file_path)
+            #
+            #     if len(hashes) == 0:
+            #         print(f"Skipping {file_path}: no hashes extracted")
+            #         continue
+            #
+            #     self.hash_table.store(track_id, hashes)
+            # except Exception as e:
+            #     print(f"Skipping {file_path}: {e}")
 
     def search(self, query_path: str) -> MatchOutcome:
         query_hashes = self.analyzer.wavfile2hashes(query_path)
@@ -257,9 +254,9 @@ class ShazamRetrievalBackend(RetrievalBackend):
         filtered_matches = float(best[1])
         time_offset = int(best[2]) if len(best) > 2 else 0
         raw_matches = int(best[3]) if len(best) > 3 else 0
-        original_rank = int(best[4]) if len(best) > 4 else 0
-        min_time = int(best[5]) if len(best) > 5 else 0
-        max_time = int(best[6]) if len(best) > 6 else 0
+        # original_rank = int(best[4]) if len(best) > 4 else 0
+        # min_time = int(best[5]) if len(best) > 5 else 0
+        # max_time = int(best[6]) if len(best) > 6 else 0
 
         best_track_id = self.hash_table.names[best_id_idx]
 
@@ -272,9 +269,9 @@ class ShazamRetrievalBackend(RetrievalBackend):
                 "query_hash_count": int(len(query_hashes)),
                 "raw_matches": raw_matches,
                 "time_offset_frames": time_offset,
-                "original_rank": original_rank,
-                "min_time_frame": min_time,
-                "max_time_frame": max_time,
+                # "original_rank": original_rank,
+                # "min_time_frame": min_time,
+                # "max_time_frame": max_time,
             },
         )
 

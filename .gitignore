@@ -1,5 +1,8 @@
 ﻿/Figures/Figures
 /temp_queries
+
+/vendor/audfprint/tests/data
+
 *.png
 
 # Byte-compiled / optimized / DLL files

@@ -101,6 +101,32 @@ class TestCaseReport:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    def _positive_lines(self) -> list[str]:
+        if self.n_positive == 0:
+            return []
+
+        return [
+            f"Positive Queries: {self.n_positive}",
+            f"Top-1 Accuracy: {format_float(self.top1_accuracy_pct)}",
+            f"Verified Pass Rate: {format_float(self.verified_pass_rate_pct)}",
+            f"Average Score (Correct Prediction): {format_float(self.avg_score_correct)}",
+            f"Average Score (Wrong Prediction): {format_float(self.avg_score_wrong)}",
+            f"Average Query Time: {format_float(self.avg_query_time_s)}",
+        ]
+
+    def _negative_lines(self) -> list[str]:
+        if self.n_negative == 0:
+            return []
+
+        return [
+            f"Negative Queries: {self.n_negative}",
+            f"True Negative Rate: {format_float(self.true_negative_rate_pct)}",
+            f"Average Negative Score: {format_float(self.avg_score_negative)}",
+        ]
+
+    def to_lines(self) -> list[str]:
+        return [f"\n--- Results for: {self.test_case} ---", *self._positive_lines(), *self._negative_lines()]
+
 
 @dataclass
 class BenchmarkConfig:
@@ -158,7 +184,7 @@ class BenchmarkReport:
             avg_query_time_s: float | None = None
 
             if not pos_group.empty:
-                raw_hits = pos_group["Correct ID"]
+                raw_hits = pos_group["Predicted ID"] == pos_group["Target ID"]
                 top1_accuracy_pct = float(raw_hits.mean() * 100.0)
                 verified_pass_rate_pct = float((pos_group["Status"] == TestStatus.PASS).mean() * 100.0)
                 avg_query_time_s = float(pos_group["Query Time (s)"].mean())
@@ -203,33 +229,8 @@ class BenchmarkReport:
         print(f"Decision rule: {decision_rule}")
 
         for summary in self.summarize():
-            print(f"\n--- Results for: {summary.test_case} ---")
+            print("\n".join(summary.to_lines()))
 
-            if summary.n_positive > 0:
-                print(f"Positive Queries: {summary.n_positive}")
-                print(f"Top-1 Accuracy: {summary.top1_accuracy_pct:.2f}%")
-                print(f"Verified Pass Rate: {summary.verified_pass_rate_pct:.2f}%")
 
-                if summary.avg_score_correct is not None:
-                    print(f"Avg Score (Correct ID): {summary.avg_score_correct:.4f}")
-                else:
-                    print("Avg Score (Correct ID): nan")
-
-                if summary.avg_score_wrong is not None:
-                    print(f"Avg Score (Wrong ID): {summary.avg_score_wrong:.4f}")
-                else:
-                    print("Avg Score (Wrong ID): nan")
-
-                if summary.avg_query_time_s is not None:
-                    print(f"Avg Query Time: {summary.avg_query_time_s:.4f}s")
-                else:
-                    print("Avg Query Time: nan")
-
-            if summary.n_negative > 0:
-                print(f"Negative Queries: {summary.n_negative}")
-                print(f"True Negative Rate: {summary.true_negative_rate_pct:.2f}%")
-
-                if summary.avg_score_negative is not None:
-                    print(f"Avg Negative Score: {summary.avg_score_negative:.4f}")
-                else:
-                    print("Avg Negative Score: nan")
+def format_float(value: float | None) -> str:
+    return "NaN" if value is None else f"{value:.4f}"
