@@ -1,10 +1,10 @@
-﻿import math
-import os
+﻿import os
 import re
 import secrets
 import shutil
 import string
 import time
+from pathlib import Path
 
 import librosa
 import numpy as np
@@ -14,8 +14,8 @@ from tqdm import tqdm
 
 from .data_structures import TestType, TestStatus, MatchOutcome, BenchmarkTrial, BenchmarkConfig, BenchmarkReport
 from .test_cases import AudioTestCase
-from ..retrieval_backends import RetrievalBackend
 from ..EigenSpectraFingerprinter.spectrogram_generation import load_audio
+from ..retrieval_backends import RetrievalBackend
 
 
 def random_suffix(length=8):
@@ -38,16 +38,16 @@ class BenchmarkRunner:
         if not all_filepaths:
             raise ValueError("File path list cannot be empty.")
 
-        self.backend = backend
-        self.config = config
-        self.all_filepaths = all_filepaths
-
         self.db_tracks: list[str] = []
         self.query_tracks: list[str] = []
         self.alien_tracks: list[str] = []
         self.query_offsets: dict[str, float] = {}
+
+        self.backend: RetrievalBackend = backend
+        self.config: BenchmarkConfig = config
+        self.all_filepaths: list[str] = all_filepaths
         self.results: BenchmarkReport = BenchmarkReport()
-        self.rng = np.random.default_rng(self.config.random_seed)
+        self.rng: np.random.Generator = np.random.default_rng(self.config.random_seed)
 
         # Ensure base temp dir exists
         os.makedirs(self.config.temp_dir, exist_ok=True)
@@ -72,7 +72,7 @@ class BenchmarkRunner:
         # if n_db + (n_query * 2) > n_total:
         if n_db + n_query > n_total:
             # We need enough for DB + Positive Queries + Negative Queries (Aliens)
-            raise ValueError(f"Not enough tracks! Need {n_db + 2 * n_query}, but have {n_total}.")
+            raise ValueError(f"Not enough tracks! Need {n_db + n_query}, but have {n_total}.")
 
         # Shuffle all file paths reproducibly
         shuffled_indices = self.rng.permutation(n_total)
@@ -115,7 +115,7 @@ class BenchmarkRunner:
             test_type: TestType
     ) -> BenchmarkTrial:
         """Processes one audio file query."""
-        target_id = os.path.basename(query_path)
+        target_id = Path(query_path).stem
 
         match_outcome = MatchOutcome(
             predicted_track_id=None,

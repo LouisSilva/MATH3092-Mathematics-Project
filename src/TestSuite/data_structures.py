@@ -91,7 +91,7 @@ class TestCaseReport:
     n_positive: int
     n_negative: int
     top1_accuracy_pct: float | None
-    verified_pass_rate_pct: float | None
+    identification_rate_pct: float | None
     true_negative_rate_pct: float | None
     avg_score_correct: float | None
     avg_score_wrong: float | None
@@ -108,7 +108,7 @@ class TestCaseReport:
         return [
             f"Positive Queries: {self.n_positive}",
             f"Top-1 Accuracy: {format_float(self.top1_accuracy_pct)}",
-            f"Verified Pass Rate: {format_float(self.verified_pass_rate_pct)}",
+            f"Identification Rate: {format_float(self.identification_rate_pct)}",
             f"Average Score (Correct Prediction): {format_float(self.avg_score_correct)}",
             f"Average Score (Wrong Prediction): {format_float(self.avg_score_wrong)}",
             f"Average Query Time: {format_float(self.avg_query_time_s)}",
@@ -176,7 +176,7 @@ class BenchmarkReport:
             neg_group = group[group["Test Type"] == TestType.NEGATIVE]
 
             top1_accuracy_pct: float | None = None
-            verified_pass_rate_pct: float | None = None
+            identification_rate_pct: float | None = None
             true_negative_rate_pct: float | None = None
             avg_score_correct: float | None = None
             avg_score_wrong: float | None = None
@@ -186,7 +186,7 @@ class BenchmarkReport:
             if not pos_group.empty:
                 raw_hits = pos_group["Predicted ID"] == pos_group["Target ID"]
                 top1_accuracy_pct = float(raw_hits.mean() * 100.0)
-                verified_pass_rate_pct = float((pos_group["Status"] == TestStatus.PASS).mean() * 100.0)
+                identification_rate_pct = float((pos_group["Status"] == TestStatus.PASS).mean() * 100.0)
                 avg_query_time_s = float(pos_group["Query Time (s)"].mean())
 
                 correct_matches = pos_group[raw_hits]
@@ -207,7 +207,7 @@ class BenchmarkReport:
                     n_positive=int(len(pos_group)),
                     n_negative=int(len(neg_group)),
                     top1_accuracy_pct=top1_accuracy_pct,
-                    verified_pass_rate_pct=verified_pass_rate_pct,
+                    identification_rate_pct=identification_rate_pct,
                     true_negative_rate_pct=true_negative_rate_pct,
                     avg_score_correct=avg_score_correct,
                     avg_score_wrong=avg_score_wrong,
