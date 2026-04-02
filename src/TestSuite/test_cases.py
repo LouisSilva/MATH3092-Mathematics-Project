@@ -1,6 +1,7 @@
-﻿import librosa
+﻿from abc import ABC, abstractmethod
+
+import librosa
 import numpy as np
-from abc import ABC, abstractmethod
 from pedalboard import Reverb, Distortion, Clipping
 
 
@@ -30,18 +31,20 @@ class CleanTrackTest(AudioTestCase):
 class WhiteNoiseTest(AudioTestCase):
     """Adds Gaussian white noise to the audio."""
 
-    def __init__(self, snr_db: float = 10.0):
+    def __init__(self, snr_db: int = 5):
         super().__init__(snr_db=snr_db)
 
     def apply(self, audio: np.ndarray, sr: int, rng: np.random.Generator) -> np.ndarray:
         average_signal_power = np.mean(audio ** 2) + 1e-12
-        target_average_white_noise_power = average_signal_power / (10 ** (self.params['snr_db'] / 10.0))
+        target_average_white_noise_power = average_signal_power / (10 ** (self.params['snr_db'] / 10))
 
         white_noise_standard_deviation = np.sqrt(target_average_white_noise_power)
-        white_noise_samples = rng.normal(loc=0, scale=white_noise_standard_deviation, size=audio.shape[0]).astype(audio.dtype)
+        white_noise_samples = rng.normal(loc=0, scale=white_noise_standard_deviation, size=audio.shape[0]).astype(
+            audio.dtype)
 
         noisy_audio_samples = audio + white_noise_samples
-        return np.clip(noisy_audio_samples, -1, 1)
+        return noisy_audio_samples
+        # return np.clip(noisy_audio_samples, -1, 1)
 
 
 class PitchShiftTest(AudioTestCase):

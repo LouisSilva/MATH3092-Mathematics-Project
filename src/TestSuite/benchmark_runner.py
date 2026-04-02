@@ -14,6 +14,7 @@ from tqdm import tqdm
 
 from .data_structures import TestType, TestStatus, MatchOutcome, BenchmarkTrial, BenchmarkConfig, BenchmarkReport
 from .test_cases import AudioTestCase
+from .metrics import Metric, DEFAULT_METRICS
 from ..EigenSpectraFingerprinter.spectrogram_generation import load_audio
 from ..retrieval_backends import RetrievalBackend
 
@@ -31,10 +32,13 @@ def sanitize_filename(text: str) -> str:
 class BenchmarkRunner:
     def __init__(
             self,
-            backend: RetrievalBackend,
+            backends: list[RetrievalBackend],
             config: BenchmarkConfig,
             all_filepaths: list[str],
     ):
+        if not backends:
+            raise ValueError("You must provide at least one backend.")
+
         if not all_filepaths:
             raise ValueError("File path list cannot be empty.")
 
@@ -43,11 +47,12 @@ class BenchmarkRunner:
         self.alien_tracks: list[str] = []
         self.query_offsets: dict[str, float] = {}
 
-        self.backend: RetrievalBackend = backend
         self.config: BenchmarkConfig = config
-        self.all_filepaths: list[str] = all_filepaths
-        self.results: BenchmarkReport = BenchmarkReport()
-        self.rng: np.random.Generator = np.random.default_rng(self.config.random_seed)
+        self.backends: list[RetrievalBackend] = backends
+        self.results: dict[str, BenchmarkReport] = {backend.backend_name: BenchmarkReport() for backend in self.backends}
+
+        self.all_filepaths: list[str] = all_filepaths # TODO: Put this in the BenchmarkConfig object
+        self.rng: np.random.Generator = np.random.default_rng(self.config.random_seed) # TODO: Maybe this too?
 
         # Ensure base temp dir exists
         os.makedirs(self.config.temp_dir, exist_ok=True)
@@ -64,7 +69,7 @@ class BenchmarkRunner:
 
     def setup_database(self) -> None:
         """Selects tracks for DB and queries, then populates the database."""
-        print("--- Setting up database ---")
+        print("Setting up database...")
         n_total = len(self.all_filepaths)
         n_db = self.config.n_db_tracks
         n_query = self.config.n_query_tracks
@@ -98,48 +103,38 @@ class BenchmarkRunner:
         print(f"Selected {len(self.query_tracks)} tracks for positive queries.")
         print(f"Selected {len(self.alien_tracks)} tracks for negative/alien queries.")
 
-        self.backend.add_tracks(self.db_tracks)
+        for backend in self.backends:
+            backend.add_tracks(self.db_tracks)
+
         print("Database setup complete")
 
     def train(self, training_filepaths: list[str]) -> None:
-        print(f"Training backend on {len(training_filepaths)} files.")
-        self.backend.train(training_filepaths)
-
-    def _initial_score_value(self) -> float:
-        return 0.0 if self.backend.higher_is_better else float("inf")
+        print(f"Training backends on {len(training_filepaths)} files.")
+        for backend in self.backends:
+            backend.train(training_filepaths)
 
     def _run_single_query(
             self,
             query_path: str,
             test_case: AudioTestCase,
             test_type: TestType
-    ) -> BenchmarkTrial:
-        """Processes one audio file query."""
-        target_id = Path(query_path).stem
+    ) -> dict[str, BenchmarkTrial]:
+        """
+        Processes one audio file query across all backends.
 
-        match_outcome = MatchOutcome(
-            predicted_track_id=None,
-            score=self._initial_score_value(),
-            score_name=self.backend.score_name,
-            higher_is_better=self.backend.higher_is_better,
-            metadata={},
-        )
+        :arg query_path:
+        :arg test_case:
+        :arg test_type:
+        :returns: A dictionary of ``BenchmarkTrial`` objects indexed by the name of the backend the benchmark was performed on.
+        """
+        target_track_id = Path(query_path).stem
+        temp_query_filename = f"{test_type}_{sanitize_filename(str(test_case))}_{sanitize_filename(target_track_id)}.wav"
+        temp_query_filepath = os.path.join(self.config.temp_dir, temp_query_filename)
 
-        benchmark_trial = BenchmarkTrial(
-            test_case=str(test_case),
-            test_type=test_type,
-            target_track_id=target_id,
-            match_outcome=match_outcome,
-            query_time_s=0.0,
-            status=TestStatus.ERROR,
-        )
-
-        temp_filename = f"{test_type}_{sanitize_filename(str(test_case))}_{sanitize_filename(target_id)}.wav"
-        temp_file_path = os.path.join(self.config.temp_dir, temp_filename)
+        trials = {}
 
         try:
-            # Load audio and select a random snippet
-
+            # Load the audio and select a random snippet
             audio_snippet, sr = load_audio(
                 query_path,
                 f_s=self.config.f_s,
@@ -147,56 +142,91 @@ class BenchmarkRunner:
                 duration=self.config.snippet_duration_sec
             )
 
-            # Apply some function to the audio (e.g. add white noise, distortion, reverb, etc.)
-            distorted_audio = test_case.apply(audio_snippet, sr, self.rng)
+            # Apply some transformation to the audio (e.g. add white noise, distortion, reverb, etc.)
+            transformed_audio = test_case.apply(audio_snippet, sr, self.rng)
 
-            # Write to a temp file
-            sf.write(temp_file_path, distorted_audio, sr)
+            # Write it to a temp file
+            sf.write(temp_query_filepath, transformed_audio, sr)
 
-            # Run the search algorithm and record how much time it takes
-            start_time = time.perf_counter()
-            match_outcome: MatchOutcome = self.backend.search(temp_file_path)
-            end_time = time.perf_counter()
+            for backend in self.backends:
+                # Initialize the MatchOutcome and BenchmarkTrial objects
+                match_outcome = MatchOutcome(
+                    predicted_track_id=None,
+                    score=backend.initial_score,
+                    score_name=backend.score_name,
+                    higher_is_better=backend.higher_is_better,
+                    metadata={}
+                )
 
-            # Record the results
-            benchmark_trial.query_time_s = end_time - start_time
-            benchmark_trial.match_outcome = match_outcome
+                benchmark_trial = BenchmarkTrial(
+                    test_case=str(test_case),
+                    test_type=test_type,
+                    target_track_id=target_track_id,
+                    match_outcome=match_outcome,
+                    query_time_s=0,
+                    status=TestStatus.ERROR
+                )
 
-            is_confident = self.backend.is_confident_match(match_outcome)
+                try:
+                    # Run the search algorithm and record how much time it takes
+                    start_time = time.perf_counter()
+                    match_outcome: MatchOutcome = backend.search(temp_query_filepath)
+                    end_time = time.perf_counter()
 
-            # Process the different test types
-            if test_type == TestType.POSITIVE:
-                is_match = match_outcome.predicted_track_id == target_id
-                benchmark_trial.status = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
+                    # Record the results
+                    benchmark_trial.query_time_s = end_time - start_time
+                    benchmark_trial.match_outcome = match_outcome
 
-            elif test_type == TestType.NEGATIVE:
-                benchmark_trial.status = TestStatus.PASS if not is_confident else TestStatus.FAIL
+                    is_confident = backend.is_confident_match(match_outcome) # TODO: Add this to the BenchmarkTrial object possibly
+
+                    # Process the different test types
+                    if test_type == TestType.POSITIVE:
+                        is_match = match_outcome.predicted_track_id == target_track_id
+                        benchmark_trial.status = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
+
+                    elif test_type == TestType.NEGATIVE:
+                        benchmark_trial.status = TestStatus.PASS if not is_confident else TestStatus.FAIL
+
+                except Exception as e:
+                    print(f"Error processing {query_path} with {backend.backend_name}: {e}")
+
+                trials[backend.backend_name] = benchmark_trial
 
         except Exception as e:
-            print(f"Error processing {query_path}: {e}")
-            benchmark_trial.status = TestStatus.ERROR
+            print(f"Error generating transformed audio for {query_path}: {e}")
+
+            # If the audio generation fails, then the trial for all backends fail
+            for backend in self.backends:
+                trials[backend.backend_name] = BenchmarkTrial(
+                    test_case=str(test_case),
+                    test_type=test_type,
+                    target_track_id=target_track_id,
+                    match_outcome=MatchOutcome(None, backend.initial_score, backend.score_name, backend.higher_is_better),
+                    query_time_s=0,
+                    status=TestStatus.ERROR,
+                )
 
         finally:
             # Cleanup the temp files
-            if os.path.exists(temp_file_path):
+            if os.path.exists(temp_query_filepath):
+                any_failed = any(trial.status in (TestStatus.FAIL, TestStatus.ERROR) for trial in trials.values())
 
-                # Move if config enabled for that status, otherwise delete
-                if benchmark_trial.status == TestStatus.PASS and self.config.save_passed_queries:
-                    shutil.move(temp_file_path, os.path.join(self.passed_dir, temp_filename))
+                # If any backend FAILED, and saving FAILED queries is enabled in the config, then the query audio shall be saved
+                if any_failed and self.config.save_failed_queries and test_type == TestType.POSITIVE:
+                    shutil.move(temp_query_filepath, os.path.join(self.failed_dir, temp_query_filename))
 
-                elif (
-                        benchmark_trial.status == TestStatus.FAIL or benchmark_trial.status == TestStatus.ERROR) and self.config.save_failed_queries:
-                    # We only care about the positive test types
-                    if test_type == TestType.POSITIVE:
-                        shutil.move(temp_file_path, os.path.join(self.failed_dir, temp_filename))
+                # If they DIDN'T FAIL, and saving PASSED queries is enabled in the config, then the query audio shall be saved
+                elif not any_failed and self.config.save_passed_queries and test_type == TestType.POSITIVE:
+                    shutil.move(temp_query_filepath, os.path.join(self.passed_dir, temp_query_filename))
 
+                # Otherwise, delete the query audio
                 else:
-                    os.remove(temp_file_path)
+                    os.remove(temp_query_filepath)
 
-        return benchmark_trial
+        return trials
 
     def run_experiment(self, test_cases: list[AudioTestCase]) -> None:
-        """Runs all the specified test cases."""
+        """Runs the specified test cases across all backends."""
         for case in test_cases:
             print(f"\n--- Running Test Case: {case} ---")
 
@@ -208,16 +238,36 @@ class BenchmarkRunner:
 
             all_tasks = positive_tasks + negative_tasks
             for task in tqdm(all_tasks, desc=f"Querying ({str(case)})"):
-                self.results.add(self._run_single_query(*task))
+                trials_dict = self._run_single_query(*task)
+
+                for backend_name, trial in trials_dict.items():
+                    self.results[backend_name].add(trial)
 
     def get_results_df(self) -> pd.DataFrame:
-        """Returns the collected results as a pandas DataFrame."""
-        return self.results.to_dataframe()
+        """Returns the collected results as a single pandas ``DataFrame`` with a backend column."""
+        dfs = []
+        for backend_name, report in self.results.items():
+            df = report.to_dataframe()
 
-    def summarize_results(self) -> None:
-        """Prints a detailed summary of the experiment results."""
-        self.results.print_summary(
-            score_name=self.backend.score_name,
-            higher_is_better=self.backend.higher_is_better,
-            decision_rule=self.backend.decision_rule,
-        )
+            if not df.empty:
+                df.insert(0, "Backend", backend_name)
+                dfs.append(df)
+
+        return pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
+
+    def summarize_results(self, metrics: list[Metric] | None = None) -> None:
+        """Prints a detailed summary of the experiment results for all backends."""
+        if metrics is None:
+            metrics = DEFAULT_METRICS
+
+        for backend in self.backends:
+            print(f"\n{'-' * 20}")
+            print(f"BACKEND: {backend.backend_name}")
+            print(f"{'-' * 20}")
+
+            self.results[backend.backend_name].print_summary(
+                score_name=backend.score_name,
+                higher_is_better=backend.higher_is_better,
+                decision_rule=backend.decision_rule,
+                metrics=metrics
+            )

@@ -1,7 +1,7 @@
-﻿import os
-from tqdm import tqdm
+﻿from tqdm import tqdm
 import numpy as np
 from abc import ABC, abstractmethod
+from pathlib import Path
 
 from src.TestSuite.data_structures import MatchOutcome
 from vendor.audfprint import audfprint_analyze, audfprint_match, hash_table
@@ -25,6 +25,11 @@ class RetrievalBackend(ABC):
     @property
     @abstractmethod
     def score_name(self) -> str:
+        pass
+
+    @property
+    @abstractmethod
+    def initial_score(self) -> int | float:
         pass
 
     @property
@@ -75,10 +80,13 @@ class PCARetrievalBackend(RetrievalBackend):
     def decision_rule(self) -> str:
         return f"accept if distance <= {self.confident_match_threshold:.4f}"
 
+    @property
+    def initial_score(self) -> int | float:
+        return float("inf")
+
     def train(self, file_list: list[str]) -> None:
         """
         Train the PCA model if it is not already fitted.
-
         :arg file_list: List of audio files used to train on.
         """
         if getattr(self.fingerprinter, "is_fitted", False):
@@ -95,7 +103,7 @@ class PCARetrievalBackend(RetrievalBackend):
         for file_path in tqdm(track_files, total=len(track_files)):
             try:
                 fingerprint = self.fingerprinter.get_fingerprint(file_path)
-                track_id = os.path.basename(file_path)
+                track_id = Path(file_path).stem
                 self.db[track_id] = fingerprint
             except Exception as e:
                 print(f"Skipping {file_path}: {e}")
@@ -196,6 +204,10 @@ class ShazamRetrievalBackend(RetrievalBackend):
     def decision_rule(self) -> str:
         return f"accept if aligned_hashes >= {self.confident_match_threshold}"
 
+    @property
+    def initial_score(self) -> int | float:
+        return 0
+
     def train(self, file_list: list[str]) -> None:
         return None
 
@@ -204,24 +216,13 @@ class ShazamRetrievalBackend(RetrievalBackend):
 
         for file_path in tqdm(track_files, total=len(track_files)):
             hashes = self.analyzer.wavfile2hashes(file_path)
-            track_id = os.path.basename(file_path)
+            track_id = Path(file_path).stem
 
             if len(hashes) == 0:
                 print(f"Skipping {file_path}: no hashes extracted")
                 continue
 
             self.hash_table.store(track_id, hashes)
-            # try:
-            #     hashes = self.analyzer.wavfile2hashes(file_path)
-            #     track_id = os.path.basename(file_path)
-            #
-            #     if len(hashes) == 0:
-            #         print(f"Skipping {file_path}: no hashes extracted")
-            #         continue
-            #
-            #     self.hash_table.store(track_id, hashes)
-            # except Exception as e:
-            #     print(f"Skipping {file_path}: {e}")
 
     def search(self, query_path: str) -> MatchOutcome:
         query_hashes = self.analyzer.wavfile2hashes(query_path)

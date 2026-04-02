@@ -1,6 +1,7 @@
-﻿from pathlib import Path
+﻿import ast
+from pathlib import Path
+
 import pandas as pd
-import ast
 from tqdm import tqdm
 
 
@@ -78,7 +79,7 @@ def load_custom_paths(directory: str | Path) -> pd.DataFrame:
         if file.is_file() and file.suffix.lower() in {'.mp3', '.wav', '.flac'}:
             files.append(file)
 
-    df = pd.DataFrame(index=range(len(files))) # Arbitrary index
+    df = pd.DataFrame(index=range(len(files)))  # Arbitrary index
     df['filepath'] = files
     df["track_title"] = [file.name for file in files]
 
