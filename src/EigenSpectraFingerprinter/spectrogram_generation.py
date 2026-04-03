@@ -23,7 +23,7 @@ def load_audio(
     return x, sr
 
 
-def compute_spectrogram_from_audio(
+def compute_spectrogram_from_samples(
         x: np.ndarray,
         L: int = 2048,
         H: int = 1024,
@@ -77,4 +77,4 @@ def compute_spectrogram(
     :returns: A spectrogram with shape ``(M, B)`` where the values lie in the range ``[0, 1]``.
     """
     audio, _ = load_audio(file_path, f_s=f_s)
-    return compute_spectrogram_from_audio(audio, L=L, H=H, B=B, tau=tau, window_type=window_type)
+    return compute_spectrogram_from_samples(audio, L=L, H=H, B=B, tau=tau, window_type=window_type)

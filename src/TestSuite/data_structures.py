@@ -90,15 +90,21 @@ class TestCaseReport:
 
 
 @dataclass
-class BenchmarkConfig:
+class BenchmarkConfig:  # TODO: Write docstring with all arguments
     f_s: int = 44100
-    snippet_duration_sec: float = 5.0
-    n_db_tracks: int = 100
-    n_query_tracks: int = 20
+    snippet_duration_sec: float = 5
+    num_db_tracks: int = 100
+    num_positive_queries: int = 50
+    num_negative_queries: int = 10
     random_seed: int = 42
     save_passed_queries: bool = True
     save_failed_queries: bool = True
     temp_dir: str = "temp_queries"
+
+    def __post_init__(self):
+        if self.num_positive_queries > self.num_db_tracks:
+            raise ValueError(
+                f"Cannot have more positive queries ({self.num_positive_queries}) than tracks in the database ({self.num_db_tracks}). Positive queries must be a subset of the database.")
 
 
 @dataclass
@@ -123,7 +129,7 @@ class BenchmarkReport:
             return pd.DataFrame()
         return pd.DataFrame([item.to_dict() for item in self.benchmark_trials])
 
-    def summarize(self, metrics: list['Metric']) -> list[TestCaseReport]:
+    def summarize(self, metrics: list[Metric]) -> list[TestCaseReport]:
         if not self.benchmark_trials:
             return []
 
@@ -143,7 +149,14 @@ class BenchmarkReport:
 
         return summaries
 
-    def print_summary(self, *, score_name: str, higher_is_better: bool, decision_rule: str, metrics: list['Metric']) -> None:
+    def print_summary(
+            self,
+            *,
+            score_name: str,
+            higher_is_better: bool,
+            decision_rule: str,
+            metrics: list[Metric]
+    ) -> None:
         if not self.benchmark_trials:
             print("No results to summarize.")
             return

@@ -1,7 +1,6 @@
 ﻿import os
 import re
 import secrets
-import shutil
 import string
 import time
 from pathlib import Path
@@ -11,6 +10,7 @@ import numpy as np
 import pandas as pd
 import soundfile as sf
 from tqdm import tqdm
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .data_structures import TestType, TestStatus, MatchOutcome, BenchmarkTrial, BenchmarkConfig, BenchmarkReport
 from .test_cases import AudioTestCase
@@ -68,34 +68,29 @@ class BenchmarkRunner:
             os.makedirs(self.failed_dir, exist_ok=True)
 
     def setup_database(self) -> None:
-        """Selects tracks for DB and queries, then populates the database."""
+        """Selects tracks for DB and queries, then populates the database for all backends."""
         print("Setting up database...")
         n_total = len(self.all_filepaths)
-        n_db = self.config.n_db_tracks
-        n_query = self.config.n_query_tracks
 
-        # if n_db + (n_query * 2) > n_total:
-        if n_db + n_query > n_total:
-            # We need enough for DB + Positive Queries + Negative Queries (Aliens)
-            raise ValueError(f"Not enough tracks! Need {n_db + n_query}, but have {n_total}.")
+        if self.config.num_db_tracks + self.config.num_negative_queries > n_total:
+            raise ValueError(f"Not enough total tracks. Need {self.config.num_db_tracks} (Database tracks) + {self.config.num_negative_queries} (Negative queries) = {self.config.num_db_tracks + self.config.num_negative_queries} tracks, but only {n_total} are available.")
 
-        # Shuffle all file paths reproducibly
         shuffled_indices = self.rng.permutation(n_total)
 
-        # Select DB Tracks
-        db_indices = shuffled_indices[:n_db]
+        # Select DB tracks
+        db_indices = shuffled_indices[:self.config.num_db_tracks]
         self.db_tracks = [self.all_filepaths[i] for i in db_indices]
 
-        # Select Positive Queries (Subset of DB)
-        query_indices_subset = self.rng.choice(db_indices, size=n_query, replace=False)
-        self.query_tracks = [self.all_filepaths[i] for i in query_indices_subset]
+        # Select positive queries (subset of the DB)
+        pos_indices = self.rng.choice(db_indices, size=self.config.num_positive_queries, replace=False)
+        self.query_tracks = [self.all_filepaths[i] for i in pos_indices]
 
-        # Select Alien/Negative Queries (Tracks NOT in DB)
-        alien_indices = shuffled_indices[n_db: n_db + n_query]
+        # Select negative/"alien" queries (tracks not in the DB)
+        alien_indices = shuffled_indices[self.config.num_db_tracks: self.config.num_db_tracks + self.config.num_negative_queries]
         self.alien_tracks = [self.all_filepaths[i] for i in alien_indices]
 
         for path in self.query_tracks + self.alien_tracks:
-            full_duration = librosa.get_duration(path=path)
+            full_duration = sf.info(path).duration # full_duration = librosa.get_duration(path=path)
             max_offset = max(0.0, full_duration - self.config.snippet_duration_sec)
             self.query_offsets[path] = float(self.rng.uniform(0.0, max_offset))
 
@@ -117,21 +112,22 @@ class BenchmarkRunner:
             self,
             query_path: str,
             test_case: AudioTestCase,
-            test_type: TestType
+            test_type: TestType,
+            seed: int
     ) -> dict[str, BenchmarkTrial]:
         """
         Processes one audio file query across all backends.
-
         :arg query_path:
         :arg test_case:
         :arg test_type:
         :returns: A dictionary of ``BenchmarkTrial`` objects indexed by the name of the backend the benchmark was performed on.
         """
         target_track_id = Path(query_path).stem
-        temp_query_filename = f"{test_type}_{sanitize_filename(str(test_case))}_{sanitize_filename(target_track_id)}.wav"
-        temp_query_filepath = os.path.join(self.config.temp_dir, temp_query_filename)
+        local_rng = np.random.default_rng(seed)
 
         trials = {}
+        transformed_audio = None
+        sr = None
 
         try:
             # Load the audio and select a random snippet
@@ -143,10 +139,7 @@ class BenchmarkRunner:
             )
 
             # Apply some transformation to the audio (e.g. add white noise, distortion, reverb, etc.)
-            transformed_audio = test_case.apply(audio_snippet, sr, self.rng)
-
-            # Write it to a temp file
-            sf.write(temp_query_filepath, transformed_audio, sr)
+            transformed_audio = test_case.apply(audio_snippet, sr, local_rng)
 
             for backend in self.backends:
                 # Initialize the MatchOutcome and BenchmarkTrial objects
@@ -170,7 +163,8 @@ class BenchmarkRunner:
                 try:
                     # Run the search algorithm and record how much time it takes
                     start_time = time.perf_counter()
-                    match_outcome: MatchOutcome = backend.search(temp_query_filepath)
+                    # match_outcome: MatchOutcome = backend.search_from_file(temp_query_filepath)
+                    match_outcome: MatchOutcome = backend.search_from_samples(transformed_audio)
                     end_time = time.perf_counter()
 
                     # Record the results
@@ -207,37 +201,36 @@ class BenchmarkRunner:
                 )
 
         finally:
-            # Cleanup the temp files
-            if os.path.exists(temp_query_filepath):
+            # Write the queries to disk if the option is enabled in the config
+            if transformed_audio is not None and sr is not None:
+                temp_query_filename = f"{test_type}_{sanitize_filename(str(test_case))}_{sanitize_filename(target_track_id)}.wav"
                 any_failed = any(trial.status in (TestStatus.FAIL, TestStatus.ERROR) for trial in trials.values())
 
                 # If any backend FAILED, and saving FAILED queries is enabled in the config, then the query audio shall be saved
                 if any_failed and self.config.save_failed_queries and test_type == TestType.POSITIVE:
-                    shutil.move(temp_query_filepath, os.path.join(self.failed_dir, temp_query_filename))
+                    sf.write(os.path.join(self.failed_dir, temp_query_filename), transformed_audio, sr)
 
                 # If they DIDN'T FAIL, and saving PASSED queries is enabled in the config, then the query audio shall be saved
                 elif not any_failed and self.config.save_passed_queries and test_type == TestType.POSITIVE:
-                    shutil.move(temp_query_filepath, os.path.join(self.passed_dir, temp_query_filename))
-
-                # Otherwise, delete the query audio
-                else:
-                    os.remove(temp_query_filepath)
+                    sf.write(os.path.join(self.passed_dir, temp_query_filename), transformed_audio, sr)
 
         return trials
 
-    def run_experiment(self, test_cases: list[AudioTestCase]) -> None:
-        """Runs the specified test cases across all backends."""
+    def run_experiment(self, test_cases: list[AudioTestCase], max_workers: int = 8) -> None:
+        """Runs the specified test cases across all backends concurrently."""
         for case in test_cases:
             print(f"\n--- Running Test Case: {case} ---")
 
             # Positive Control: Query with tracks that should be in the DB
-            positive_tasks = [(path, case, TestType.POSITIVE) for path in self.query_tracks]
+            positive_queries = [(path, case, TestType.POSITIVE) for path in self.query_tracks]
 
             # Negative Control: Query with tracks that are not in the DB
-            negative_tasks = [(path, case, TestType.NEGATIVE) for path in self.alien_tracks]
+            negative_queries = [(path, case, TestType.NEGATIVE) for path in self.alien_tracks]
 
-            all_tasks = positive_tasks + negative_tasks
-            for task in tqdm(all_tasks, desc=f"Querying ({str(case)})"):
+            all_queries = positive_queries + negative_queries
+            # query_seeds = self.rng.integers(0, 2**32 - 1, size=len(all_queries))
+
+            for task in tqdm(all_queries, desc=f"Querying ({str(case)})"):
                 trials_dict = self._run_single_query(*task)
 
                 for backend_name, trial in trials_dict.items():

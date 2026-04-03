@@ -4,7 +4,7 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-from .spectrogram_generation import compute_spectrogram
+from .spectrogram_generation import compute_spectrogram, compute_spectrogram_from_samples, load_audio
 
 
 class FingerprintProjectionStrategy(ABC):
@@ -92,7 +92,7 @@ class PCAFingerprinter:
                 break
 
             # Select only a maximum of kappa segments
-            spectrogram = self.__compute_spectrogram(file_path)
+            spectrogram = compute_spectrogram(file_path)
             max_allowed_segments = min(self.kappa, segments_remaining_before_max_size)
             if spectrogram.shape[0] > max_allowed_segments:
                 indices = np.random.choice(spectrogram.shape[0], max_allowed_segments, replace=False)
@@ -112,24 +112,34 @@ class PCAFingerprinter:
         explained_variance = self.model.explained_variance_ratio_.sum()
         print(f"Model fitted, explained variance: {explained_variance:.4f}.")
 
-    def get_fingerprint(self, file_path: str) -> np.ndarray:
+    def get_fingerprint_from_file(self, filepath: str) -> np.ndarray:
         """
-        Generates a fingerprint using the configured model and strategy.
-
-        :arg file_path: Audio file to fingerprint.
+        Generates a fingerprint.
+        :arg filepath: The filepath to the audio to be fingerprinted.
         :returns: Low-dimensional representation of the given audio's spectrogram, a matrix with dimensions (``M``, ``phi``).
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before fingerprinting.")
 
-        spectrogram = self.__compute_spectrogram(file_path)
+        audio, sr = load_audio(filepath, self.f_s)
+        return self.get_fingerprint_from_samples(audio)
+
+    def get_fingerprint_from_samples(self, audio: np.ndarray) -> np.ndarray:
+        """
+        Generates a fingerprint.
+        :arg audio: The numpy array of samples to fingerprint.
+        :returns: Low-dimensional representation of the given audio's spectrogram, a matrix with dimensions (``M``, ``phi``).
+        """
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before fingerprinting.")
+
+        spectrogram = compute_spectrogram_from_samples(audio, self.L, self.H, self.B, self.tau, self.window_type)
         compressed = self.model.transform(spectrogram)
         return self.fingerprint_strategy.generate(compressed)
 
     def plot_scree(self, cumulative: bool = True) -> None:
         """
         Displays a scree plot of explained variance.
-
         :arg cumulative: Whether to display the cumulative explained variance.
         """
         if not self.is_fitted:
@@ -151,7 +161,3 @@ class PCAFingerprinter:
         plt.grid(True, alpha=0.3)
         plt.tight_layout()
         plt.show()
-
-    def __compute_spectrogram(self, file_path: str) -> np.ndarray:
-        return compute_spectrogram(file_path, f_s=self.f_s, L=self.L, H=self.H, B=self.B, tau=self.tau,
-                                   window_type=self.window_type)

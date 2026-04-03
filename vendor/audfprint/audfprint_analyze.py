@@ -10,6 +10,8 @@ Class to do the analysis of wave files into hash constellations.
 from __future__ import division, print_function
 
 import os
+from typing import AnyStr
+
 import numpy as np
 
 import scipy.signal
@@ -362,11 +364,11 @@ class Analyzer(object):
 
         return landmarks
 
-    def wavfile2peaks(self, filename, shifts=None):
+    def wavfile2peaks(self, filename: str | os.PathLike[AnyStr], shifts=None):
         """ Read a soundfile and return its landmark peaks as a
             list of (time, bin) pairs.  If specified, resample to sr first.
             shifts > 1 causes hashes to be extracted from multiple shifts of
-            waveform, to reduce frame effects.  """
+            waveform, to reduce frame effects."""
         ext = os.path.splitext(filename)[1]
         if ext == PRECOMPPKEXT:
             # short-circuit - precomputed fingerprint file
@@ -374,16 +376,18 @@ class Analyzer(object):
             dur = np.max(peaks, axis=0)[0] * self.n_hop / self.target_sr
         else:
             try:
-                [d, sr] = librosa.load(filename, sr=self.target_sr)
+                d, sr = librosa.load(filename, sr=self.target_sr)
                 # d, sr = audio_read.audio_read(filename, sr=self.target_sr, channels=1)
             except Exception as e:  # audioread.NoBackendError:
                 message = "wavfile2peaks: Error reading " + filename
                 if self.fail_on_error:
                     print(e)
                     raise IOError(message)
+
                 print(message, "skipping")
                 d = []
                 sr = self.target_sr
+
             # Store duration in a global because it's hard to handle
             dur = len(d) / sr
             if shifts is None or shifts < 2:
@@ -402,32 +406,37 @@ class Analyzer(object):
         self.soundfilecount += 1
         return peaks
 
-    def wavfile2hashes(self, filename):
+    def wavfile2hashes(self, filename: str | os.PathLike[AnyStr]):
         """ Read a soundfile and return its fingerprint hashes as a
             list of (time, hash) pairs.  If specified, resample to sr first.
             shifts > 1 causes hashes to be extracted from multiple shifts of
-            waveform, to reduce frame effects.  """
+            waveform, to reduce frame effects."""
         ext = os.path.splitext(filename)[1]
         if ext == PRECOMPEXT:
             # short-circuit - precomputed fingerprint file
             hashes = hashes_load(filename)
             dur = np.max(hashes, axis=0)[0] * self.n_hop / self.target_sr
+
             # instrumentation to track total amount of sound processed
             self.soundfiledur = dur
             self.soundfiletotaldur += dur
             self.soundfilecount += 1
+
         else:
             peaks = self.wavfile2peaks(filename, self.shifts)
             if len(peaks) == 0:
                 return []
+
             # Did we get returned a list of lists of peaks due to shift?
             if isinstance(peaks[0], list):
                 peaklists = peaks
                 query_hashes = []
+
                 for peaklist in peaklists:
-                    query_hashes.append(landmarks2hashes(
-                        self.peaks2landmarks(peaklist)))
+                    query_hashes.append(landmarks2hashes(self.peaks2landmarks(peaklist)))
+
                 query_hashes = np.concatenate(query_hashes)
+
             else:
                 query_hashes = landmarks2hashes(self.peaks2landmarks(peaks))
 
@@ -447,6 +456,64 @@ class Analyzer(object):
 
         # print("wavfile2hashes: read", len(hashes), "hashes from", filename)
         return hashes
+
+    def samples2peaks(self, samples: np.ndarray, sr: float, shifts=None):
+        """ Read a vector of samples and return its landmark peaks as a
+            list of (time, bin) pairs.  If specified, resample to sr first.
+            shifts > 1 causes hashes to be extracted from multiple shifts of
+            waveform, to reduce frame effects."""
+        if sr != self.target_sr:
+            try:
+                samples = librosa.resample(samples, sr, self.target_sr)
+            except Exception as e:
+                message = "samples2peaks: Error resampling."
+                if self.fail_on_error:
+                    raise Exception(e, message)
+
+                print(e, message)
+
+        # Store duration in a global because it's hard to handle
+        dur = len(samples) / sr
+        if shifts is None or shifts < 2:
+            peaks = self.find_peaks(samples, sr)
+        else:
+            # Calculate hashes with optional part-frame shifts
+            peaklists = []
+            for shift in range(shifts):
+                shiftsamps = int(shift / self.shifts * self.n_hop)
+                peaklists.append(self.find_peaks(samples[shiftsamps:], sr))
+            peaks = peaklists
+
+        # instrumentation to track total amount of sound processed
+        self.soundfiledur = dur
+        self.soundfiletotaldur += dur
+        self.soundfilecount += 1
+        return peaks
+
+    def samples2hashes(self, samples: np.ndarray, sr: float):
+        """ Read an array of samples and return its fingerprint hashes as a
+            list of (time, hash) pairs.  If specified, resample to sr first.
+            shifts > 1 causes hashes to be extracted from multiple shifts of
+            waveform, to reduce frame effects."""
+        peaks = self.samples2peaks(samples, sr, self.shifts)
+        if len(peaks) == 0:
+            return []
+
+        # Did we get returned a list of lists of peaks due to shift?
+        if isinstance(peaks[0], list):
+            peaklists = peaks
+            query_hashes = []
+
+            for peaklist in peaklists:
+                query_hashes.append(landmarks2hashes(self.peaks2landmarks(peaklist)))
+
+            query_hashes = np.concatenate(query_hashes)
+
+        else:
+            query_hashes = landmarks2hashes(self.peaks2landmarks(peaks))
+
+        unique_hashes = np.unique(query_hashes, axis=0).astype(np.int32)
+        return unique_hashes
 
     # ########## functions to link to actual hash table index database ###### #
 

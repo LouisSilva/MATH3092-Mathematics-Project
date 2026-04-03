@@ -2,14 +2,14 @@
 from abc import ABC, abstractmethod
 from scipy.signal import convolve
 
-class FingerprintSearchStrategy(ABC):
+class PCAFingerprintSearchStrategy(ABC):
     """An interface for searching a query fingerprint in a database."""
 
     @abstractmethod
     def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         pass
 
-class HammingSearch(FingerprintSearchStrategy):
+class HammingSearch(PCAFingerprintSearchStrategy):
     """
     Searches using a sliding window with Hamming distance.
     Use with binary fingerprints.
@@ -57,7 +57,7 @@ class HammingSearch(FingerprintSearchStrategy):
 
         return best_track, normalized_min_dist
 
-class FFTConvolveSearch(FingerprintSearchStrategy):
+class FFTConvolveSearch(PCAFingerprintSearchStrategy):
     """
     Extremely fast search using 1D FFT Convolution.
     Flattens the 2D fingerprints and computes correlation in one go.

@@ -4,6 +4,9 @@ from abc import ABC, abstractmethod
 from pathlib import Path
 
 from src.TestSuite.data_structures import MatchOutcome
+from src.EigenSpectraFingerprinter.pca_fingerprinter import PCAFingerprinter
+from src.EigenSpectraFingerprinter.binary_fingerprint_search import PCAFingerprintSearchStrategy
+
 from vendor.audfprint import audfprint_analyze, audfprint_match, hash_table
 
 class RetrievalBackend(ABC):
@@ -56,7 +59,11 @@ class RetrievalBackend(ABC):
         pass
 
     @abstractmethod
-    def search(self, query_path: str) -> MatchOutcome:
+    def search_from_samples(self, audio: np.ndarray, sr: None | int = None) -> MatchOutcome: # TODO: write docstring
+        pass
+
+    @abstractmethod
+    def search_from_file(self, audio: str) -> MatchOutcome:  # TODO: write docstring
         pass
 
     @abstractmethod
@@ -70,7 +77,12 @@ class PCARetrievalBackend(RetrievalBackend):
     score_name = "distance"
     higher_is_better = False
 
-    def __init__(self, fingerprinter, search_strategy, confident_match_threshold: float = 0.35):
+    def __init__(
+            self,
+            fingerprinter: PCAFingerprinter,
+            search_strategy: PCAFingerprintSearchStrategy,
+            confident_match_threshold: float = 0.35
+    ):
         self.fingerprinter = fingerprinter
         self.search_strategy = search_strategy
         self.confident_match_threshold = float(confident_match_threshold)
@@ -102,15 +114,18 @@ class PCARetrievalBackend(RetrievalBackend):
 
         for file_path in tqdm(track_files, total=len(track_files)):
             try:
-                fingerprint = self.fingerprinter.get_fingerprint(file_path)
+                fingerprint = self.fingerprinter.get_fingerprint_from_file(file_path)
                 track_id = Path(file_path).stem
                 self.db[track_id] = fingerprint
             except Exception as e:
                 print(f"Skipping {file_path}: {e}")
 
-    def search(self, query_path: str) -> MatchOutcome:
-        query_fingerprint = self.fingerprinter.get_fingerprint(query_path)
-        best_track, best_score = self.search_strategy.search(query_fingerprint, self.db)
+    def search_from_file(self, audio: str) -> MatchOutcome:
+        query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_file(audio)
+        return self.search_from_samples(query_fingerprint)
+
+    def search_from_samples(self, audio: np.ndarray, sr: None | float = None) -> MatchOutcome:
+        best_track, best_score = self.search_strategy.search(audio, self.db)
 
         return MatchOutcome(
             predicted_track_id=best_track,
@@ -224,9 +239,15 @@ class ShazamRetrievalBackend(RetrievalBackend):
 
             self.hash_table.store(track_id, hashes)
 
-    def search(self, query_path: str) -> MatchOutcome:
-        query_hashes = self.analyzer.wavfile2hashes(query_path)
+    def search_from_file(self, audio: str) -> MatchOutcome:
+        query_hashes = self.analyzer.wavfile2hashes(audio)
+        return self.__search(query_hashes)
 
+    def search_from_samples(self, audio: np.ndarray, sr: None | float = None) -> MatchOutcome:
+        query_hashes = self.analyzer.samples2hashes(audio)
+        return self.__search(query_hashes)
+
+    def __search(self, query_hashes) -> MatchOutcome:
         if len(query_hashes) == 0:
             return MatchOutcome(
                 predicted_track_id=None,
@@ -237,7 +258,6 @@ class ShazamRetrievalBackend(RetrievalBackend):
             )
 
         results = self.matcher.match_hashes(self.hash_table, query_hashes)
-
         if results is None or len(results) == 0:
             return MatchOutcome(
                 predicted_track_id=None,
