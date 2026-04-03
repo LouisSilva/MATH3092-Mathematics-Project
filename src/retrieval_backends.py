@@ -59,7 +59,7 @@ class RetrievalBackend(ABC):
         pass
 
     @abstractmethod
-    def search_from_samples(self, audio: np.ndarray, sr: None | int = None) -> MatchOutcome: # TODO: write docstring
+    def search_from_samples(self, audio: np.ndarray, sr: float) -> MatchOutcome: # TODO: write docstring
         pass
 
     @abstractmethod
@@ -122,10 +122,18 @@ class PCARetrievalBackend(RetrievalBackend):
 
     def search_from_file(self, audio: str) -> MatchOutcome:
         query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_file(audio)
-        return self.search_from_samples(query_fingerprint)
+        best_track, best_score = self.search_strategy.search(query_fingerprint, self.db)
 
-    def search_from_samples(self, audio: np.ndarray, sr: None | float = None) -> MatchOutcome:
-        best_track, best_score = self.search_strategy.search(audio, self.db)
+        return MatchOutcome(
+            predicted_track_id=best_track,
+            score=float("inf") if best_track is None else float(best_score),
+            score_name=self.score_name,
+            higher_is_better=self.higher_is_better,
+        )
+
+    def search_from_samples(self, audio: np.ndarray, sr: float) -> MatchOutcome:
+        query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_samples(audio)
+        best_track, best_score = self.search_strategy.search(query_fingerprint, self.db)
 
         return MatchOutcome(
             predicted_track_id=best_track,
@@ -243,8 +251,8 @@ class ShazamRetrievalBackend(RetrievalBackend):
         query_hashes = self.analyzer.wavfile2hashes(audio)
         return self.__search(query_hashes)
 
-    def search_from_samples(self, audio: np.ndarray, sr: None | float = None) -> MatchOutcome:
-        query_hashes = self.analyzer.samples2hashes(audio)
+    def search_from_samples(self, audio: np.ndarray, sr: float) -> MatchOutcome:
+        query_hashes = self.analyzer.samples2hashes(audio, sr)
         return self.__search(query_hashes)
 
     def __search(self, query_hashes) -> MatchOutcome:

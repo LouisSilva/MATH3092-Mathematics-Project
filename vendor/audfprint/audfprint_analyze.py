@@ -464,7 +464,7 @@ class Analyzer(object):
             waveform, to reduce frame effects."""
         if sr != self.target_sr:
             try:
-                samples = librosa.resample(samples, sr, self.target_sr)
+                samples = librosa.resample(y=samples, orig_sr=sr, target_sr=self.target_sr)
             except Exception as e:
                 message = "samples2peaks: Error resampling."
                 if self.fail_on_error:

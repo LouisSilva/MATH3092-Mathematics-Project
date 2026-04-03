@@ -3,18 +3,17 @@ import re
 import secrets
 import string
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
-import librosa
 import numpy as np
 import pandas as pd
 import soundfile as sf
 from tqdm import tqdm
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from .data_structures import TestType, TestStatus, MatchOutcome, BenchmarkTrial, BenchmarkConfig, BenchmarkReport
-from .test_cases import AudioTestCase
 from .metrics import Metric, DEFAULT_METRICS
+from .test_cases import AudioTestCase
 from ..EigenSpectraFingerprinter.spectrogram_generation import load_audio
 from ..retrieval_backends import RetrievalBackend
 
@@ -164,7 +163,7 @@ class BenchmarkRunner:
                     # Run the search algorithm and record how much time it takes
                     start_time = time.perf_counter()
                     # match_outcome: MatchOutcome = backend.search_from_file(temp_query_filepath)
-                    match_outcome: MatchOutcome = backend.search_from_samples(transformed_audio)
+                    match_outcome: MatchOutcome = backend.search_from_samples(transformed_audio, sr)
                     end_time = time.perf_counter()
 
                     # Record the results
@@ -228,13 +227,20 @@ class BenchmarkRunner:
             negative_queries = [(path, case, TestType.NEGATIVE) for path in self.alien_tracks]
 
             all_queries = positive_queries + negative_queries
-            # query_seeds = self.rng.integers(0, 2**32 - 1, size=len(all_queries))
+            query_seeds = self.rng.integers(0, 2**32 - 1, size=len(all_queries))
 
-            for task in tqdm(all_queries, desc=f"Querying ({str(case)})"):
-                trials_dict = self._run_single_query(*task)
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                future_to_query = {
+                    executor.submit(self._run_single_query, query[0], query[1], query[2], seed): query
+                    for query, seed in zip(all_queries, query_seeds)
+                }
 
-                for backend_name, trial in trials_dict.items():
-                    self.results[backend_name].add(trial)
+                # Process them as they complete to keep the progress bar updating
+                for future in tqdm(as_completed(future_to_query), total=len(all_queries), desc=f"Querying ({str(case)})"):
+                    trials_dict = future.result()
+
+                    for backend_name, trial in trials_dict.items():
+                        self.results[backend_name].add(trial)
 
     def get_results_df(self) -> pd.DataFrame:
         """Returns the collected results as a single pandas ``DataFrame`` with a backend column."""
