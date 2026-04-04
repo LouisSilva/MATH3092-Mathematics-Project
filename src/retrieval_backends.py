@@ -2,6 +2,7 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from pathlib import Path
+import gzip
 
 from src.TestSuite.data_structures import MatchOutcome
 from src.EigenSpectraFingerprinter.pca_fingerprinter import PCAFingerprinter
@@ -49,13 +50,22 @@ class RetrievalBackend(ABC):
     def train(self, file_list: list[str]) -> None:
         """
         Optional training hook.
-
         :arg file_list: List of audio files used to train on.
         """
         return None
 
     @abstractmethod
     def add_tracks(self, track_files: list[str]) -> None:
+        pass
+
+    @abstractmethod
+    def save_database(self, filepath: str) -> None:
+        """Serializes the stored fingerprints to disk."""
+        pass
+
+    @abstractmethod
+    def load_database(self, filepath: str) -> None:
+        """Loads serialized fingerprints from disk."""
         pass
 
     @abstractmethod
@@ -120,6 +130,17 @@ class PCARetrievalBackend(RetrievalBackend):
             except Exception as e:
                 print(f"Skipping {file_path}: {e}")
 
+    def save_database(self, filepath: str) -> None:
+        """Saves the dictionary of NumPy arrays efficiently."""
+        if not self.db:
+            raise ValueError("Database is empty, hence nothing to save.")
+        np.savez_compressed(filepath, **self.db)
+
+    def load_database(self, filepath: str) -> None:
+        """Loads the database from a compressed NumPy archive."""
+        with np.load(filepath, allow_pickle=True) as data:
+            self.db = {str(k): v for k, v in data.items()}
+
     def search_from_file(self, audio: str) -> MatchOutcome:
         query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_file(audio)
         best_track, best_score = self.search_strategy.search(query_fingerprint, self.db)
@@ -174,7 +195,7 @@ class ShazamRetrievalBackend(RetrievalBackend):
         fanout: int = 3,
         freq_sd: float = 30.0,
         match_win: int = 1,
-        min_count: int = 5,
+        min_count: int = 0,
         max_matches: int = 1,
         search_depth: int = 100,
         sort_by_time: bool = False,
@@ -184,12 +205,8 @@ class ShazamRetrievalBackend(RetrievalBackend):
         maxtime: int = 16384,
         verbose: bool = False,
         fail_on_error: bool = True,
-        confident_match_threshold: int = 6,
+        confident_match_threshold: int = 5,
     ):
-        self._audfprint_analyze = audfprint_analyze
-        self._audfprint_match = audfprint_match
-        self._hash_table_module = hash_table
-
         # Setup the analyzer
         analyzer = audfprint_analyze.Analyzer(density=density)
         analyzer.target_sr = samplerate
@@ -246,6 +263,18 @@ class ShazamRetrievalBackend(RetrievalBackend):
                 continue
 
             self.hash_table.store(track_id, hashes)
+
+    def save_database(self, filepath: str) -> None:
+        """Saves the audfprint HashTable to disk."""
+        if not self.hash_table.names:
+            raise ValueError("Hash table is empty. Nothing to save.")
+
+        with gzip.open(filepath, 'wb') as f:
+            self.hash_table.save(filepath, file_object=f)
+
+    def load_database(self, filepath: str) -> None:
+        """Loads the audfprint HashTable from disk."""
+        self.hash_table.load(filepath)
 
     def search_from_file(self, audio: str) -> MatchOutcome:
         query_hashes = self.analyzer.wavfile2hashes(audio)

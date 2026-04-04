@@ -187,9 +187,11 @@ class HashTable(object):
             f = file_object
         else:
             f = gzip.open(name, 'wb')
+
         pickle.dump(self, f, pickle.HIGHEST_PROTOCOL)
         self.dirty = False
         nhashes = sum(self.counts)
+
         # Report the proportion of dropped hashes (overfull table)
         dropped = nhashes - sum(np.minimum(self.depth, self.counts))
         print("Saved fprints for", sum(n is not None for n in self.names),

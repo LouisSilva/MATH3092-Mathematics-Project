@@ -1,4 +1,5 @@
-﻿import numpy as np
+﻿import joblib
+import numpy as np
 from tqdm import tqdm
 from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
@@ -44,27 +45,28 @@ class PCAFingerprinter:
     def __init__(
             self,
             fingerprint_strategy: FingerprintProjectionStrategy,
-            gamma: int = 50000,
-            kappa: int = 50,
-            phi: int = 64,
             f_s: int = 44100,
-            L: int = 2048,
-            H: int = 1024,
+            L: int = 4096,
+            H: int = 2048,
             B: int = 128,
             tau: int = 80,
             window_type: str = "hann",
+            gamma: int = 50000,
+            kappa: int = 50,
+            phi: int = 16,
             random_state: int = 42,
     ):
         self.fingerprint_strategy = fingerprint_strategy
-        self.gamma = gamma
-        self.kappa = kappa
-        self.phi = phi
         self.f_s = f_s
         self.L = L
         self.H = H
         self.B = B
         self.tau = tau
         self.window_type = window_type
+        self.gamma = gamma
+        self.kappa = kappa
+        self.phi = phi
+        self.random_state = random_state
 
         self.is_fitted = False
         self.model = PCA(n_components=phi, random_state=random_state)
@@ -72,7 +74,6 @@ class PCAFingerprinter:
     def train(self, file_list: list[str]) -> None:
         """
         Fits the PCA basis using a random subset of segments from the training files.
-
         :arg file_list: List of audio files used to create the training matrix.
         """
         training_segments = []
@@ -111,6 +112,40 @@ class PCAFingerprinter:
 
         explained_variance = self.model.explained_variance_ratio_.sum()
         print(f"Model fitted, explained variance: {explained_variance:.4f}.")
+
+    def save_model(self, filepath: str) -> None:
+        """Serializes the trained model and its hyperparameters to disk."""
+        if not self.is_fitted:
+            raise RuntimeError("Model must be trained before it can be saved to disk.")
+
+        state = {
+            "hyperparameters": {
+                "f_s": self.f_s,
+                "L": self.L,
+                "H": self.H,
+                "B": self.B,
+                "tau": self.tau,
+                "window_type": self.window_type,
+                "gamma": self.gamma,
+                "kappa": self.kappa,
+                "phi": self.phi,
+                "random_state": self.random_state
+            },
+            "fingerprint_strategy": self.fingerprint_strategy,
+            "model": self.model,
+        }
+
+        joblib.dump(state, filepath)
+
+    @classmethod
+    def load_model(cls, filepath: str) -> "PCAFingerprinter":
+        """Factory method to load a trained model from disk and reconstruct its configuration."""
+        state = joblib.load(filepath)
+
+        instance = cls(fingerprint_strategy=state["fingerprint_strategy"], **state["hyperparameters"])
+        instance.model = state["model"]
+        instance.is_fitted = True
+        return instance
 
     def get_fingerprint_from_file(self, filepath: str) -> np.ndarray:
         """

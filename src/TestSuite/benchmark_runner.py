@@ -3,12 +3,15 @@ import re
 import secrets
 import string
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import json
 from pathlib import Path
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import numpy as np
 import pandas as pd
 import soundfile as sf
+from joblib import Parallel, delayed
+from threadpoolctl import threadpool_limits
 from tqdm import tqdm
 
 from .data_structures import TestType, TestStatus, MatchOutcome, BenchmarkTrial, BenchmarkConfig, BenchmarkReport
@@ -26,6 +29,122 @@ def random_suffix(length=8):
 def sanitize_filename(text: str) -> str:
     """Removes special characters from a string to make it safe for filenames."""
     return re.sub(r'[^\w\-. ]', '_', text)
+
+
+_WORKER_BACKENDS = None
+
+
+def _init_worker(backends):
+    """
+    Runs exactly ONCE per worker process when it starts up.
+    Receives the massive databases and stores them in memory.
+    """
+    global _WORKER_BACKENDS
+    _WORKER_BACKENDS = backends
+
+
+def _worker_run_single_query(
+        query_path: str,
+        test_case: AudioTestCase,
+        test_type: TestType,
+        seed: int,
+        f_s: int,
+        snippet_duration_sec: float,
+        query_offset: float,
+        save_failed_queries: bool,
+        save_passed_queries: bool,
+        failed_dir: str,
+        passed_dir: str
+) -> dict[str, BenchmarkTrial]:
+    """
+    Standalone function to execute a query.
+    Only receives lightweight arguments to completely eliminate IPC pickling overhead.
+    """
+    global _WORKER_BACKENDS
+
+    target_track_id = Path(query_path).stem
+    local_rng = np.random.default_rng(seed)
+
+    trials = {}
+    transformed_audio = None
+    sr = None
+
+    # Force underlying C libraries to use 1 thread per process to prevent CPU thrashing
+    with threadpool_limits(limits=1, user_api='blas'), threadpool_limits(limits=1, user_api='openmp'):
+        try:
+            audio_snippet, sr = load_audio(
+                query_path,
+                f_s=f_s,
+                offset=query_offset,
+                duration=snippet_duration_sec
+            )
+
+            transformed_audio = test_case.apply(audio_snippet, sr, local_rng)
+
+            for backend in _WORKER_BACKENDS:
+                match_outcome = MatchOutcome(
+                    predicted_track_id=None,
+                    score=backend.initial_score,
+                    score_name=backend.score_name,
+                    higher_is_better=backend.higher_is_better,
+                    metadata={}
+                )
+
+                benchmark_trial = BenchmarkTrial(
+                    test_case=str(test_case),
+                    test_type=test_type,
+                    target_track_id=target_track_id,
+                    match_outcome=match_outcome,
+                    query_time_s=0,
+                    status=TestStatus.ERROR
+                )
+
+                try:
+                    start_time = time.perf_counter()
+                    match_outcome = backend.search_from_samples(transformed_audio, sr)
+                    end_time = time.perf_counter()
+
+                    benchmark_trial.query_time_s = end_time - start_time
+                    benchmark_trial.match_outcome = match_outcome
+
+                    is_confident = backend.is_confident_match(match_outcome)
+
+                    if test_type == TestType.POSITIVE:
+                        is_match = match_outcome.predicted_track_id == target_track_id
+                        benchmark_trial.status = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
+
+                    elif test_type == TestType.NEGATIVE:
+                        benchmark_trial.status = TestStatus.PASS if not is_confident else TestStatus.FAIL
+
+                except Exception as e:
+                    print(f"Error processing {query_path} with {backend.backend_name}: {e}")
+
+                trials[backend.backend_name] = benchmark_trial
+
+        except Exception as e:
+            print(f"Error generating transformed audio for {query_path}: {e}")
+            for backend in _WORKER_BACKENDS:
+                trials[backend.backend_name] = BenchmarkTrial(
+                    test_case=str(test_case),
+                    test_type=test_type,
+                    target_track_id=target_track_id,
+                    match_outcome=MatchOutcome(None, backend.initial_score, backend.score_name,
+                                               backend.higher_is_better),
+                    query_time_s=0,
+                    status=TestStatus.ERROR,
+                )
+
+        finally:
+            if transformed_audio is not None and sr is not None:
+                temp_query_filename = f"{test_type}_{sanitize_filename(str(test_case))}_{sanitize_filename(target_track_id)}.wav"
+                any_failed = any(trial.status in (TestStatus.FAIL, TestStatus.ERROR) for trial in trials.values())
+
+                if any_failed and save_failed_queries and test_type == TestType.POSITIVE:
+                    sf.write(os.path.join(failed_dir, temp_query_filename), transformed_audio, sr)
+                elif not any_failed and save_passed_queries and test_type == TestType.POSITIVE:
+                    sf.write(os.path.join(passed_dir, temp_query_filename), transformed_audio, sr)
+
+        return trials
 
 
 class BenchmarkRunner:
@@ -67,7 +186,7 @@ class BenchmarkRunner:
             os.makedirs(self.failed_dir, exist_ok=True)
 
     def setup_database(self) -> None:
-        """Selects tracks for DB and queries, then populates the database for all backends."""
+        """Selects valid tracks for DB and queries, then populates the database for all backends."""
         print("Setting up database...")
         n_total = len(self.all_filepaths)
 
@@ -76,21 +195,49 @@ class BenchmarkRunner:
 
         shuffled_indices = self.rng.permutation(n_total)
 
-        # Select DB tracks
-        db_indices = shuffled_indices[:self.config.num_db_tracks]
-        self.db_tracks = [self.all_filepaths[i] for i in db_indices]
+        valid_db_tracks = []
+        valid_alien_tracks = []
 
-        # Select positive queries (subset of the DB)
-        pos_indices = self.rng.choice(db_indices, size=self.config.num_positive_queries, replace=False)
-        self.query_tracks = [self.all_filepaths[i] for i in pos_indices]
+        # Select DB tracks dynamically
+        idx = 0
+        while len(valid_db_tracks) < self.config.num_db_tracks and idx < n_total:
+            path = self.all_filepaths[shuffled_indices[idx]]
+            idx += 1
 
-        # Select negative/"alien" queries (tracks not in the DB)
-        alien_indices = shuffled_indices[self.config.num_db_tracks: self.config.num_db_tracks + self.config.num_negative_queries]
-        self.alien_tracks = [self.all_filepaths[i] for i in alien_indices]
+            duration = self.get_valid_duration(path)
+            if duration is not None:
+                valid_db_tracks.append((path, duration))
 
-        for path in self.query_tracks + self.alien_tracks:
-            full_duration = sf.info(path).duration # full_duration = librosa.get_duration(path=path)
-            max_offset = max(0.0, full_duration - self.config.snippet_duration_sec)
+        if len(valid_db_tracks) < self.config.num_db_tracks:
+            raise RuntimeError("Not enough valid tracks to form the database.")
+
+        self.db_tracks = [p[0] for p in valid_db_tracks]
+
+        # Select positive queries (subset of the valid DB)
+        pos_indices = self.rng.choice(len(valid_db_tracks), size=self.config.num_positive_queries, replace=False)
+        self.query_tracks = []
+        for i in pos_indices:
+            path, duration = valid_db_tracks[i]
+            self.query_tracks.append(path)
+
+            max_offset = duration - self.config.snippet_duration_sec
+            self.query_offsets[path] = float(self.rng.uniform(0.0, max_offset))
+
+        # Select negative/"alien" queries dynamically
+        while len(valid_alien_tracks) < self.config.num_negative_queries and idx < n_total:
+            path = self.all_filepaths[shuffled_indices[idx]]
+            idx += 1
+            duration = self.get_valid_duration(path)
+            if duration is not None:
+                valid_alien_tracks.append((path, duration))
+
+        if len(valid_alien_tracks) < self.config.num_negative_queries:
+            raise RuntimeError("Not enough valid tracks to form the alien queries.")
+
+        self.alien_tracks = []
+        for path, duration in valid_alien_tracks:
+            self.alien_tracks.append(path)
+            max_offset = duration - self.config.snippet_duration_sec
             self.query_offsets[path] = float(self.rng.uniform(0.0, max_offset))
 
         print(f"Selected {len(self.db_tracks)} tracks for database.")
@@ -100,7 +247,37 @@ class BenchmarkRunner:
         for backend in self.backends:
             backend.add_tracks(self.db_tracks)
 
-        print("Database setup complete")
+        print("Database setup complete.")
+
+    def save_state(self, filepath: str) -> None:
+        """Saves track selections and query offsets to disk."""
+        if not self.db_tracks:
+            raise RuntimeError("No state to save. Run setup_database() first.")
+
+        # Cast all pathlib.Path objects to strings for JSON serialization
+        state = {
+            "db_tracks": [str(p) for p in self.db_tracks],
+            "query_tracks": [str(p) for p in self.query_tracks],
+            "alien_tracks": [str(p) for p in self.alien_tracks],
+            "query_offsets": {str(k): v for k, v in self.query_offsets.items()}
+        }
+
+        with open(filepath, "w") as f:
+            json.dump(state, f)
+
+        print(f"Benchmark state saved to {filepath}")
+
+    def load_state(self, filepath: str) -> None:
+        """Loads track selections and query offsets from disk, bypassing setup_database."""
+        with open(filepath, "r") as f:
+            state = json.load(f)
+
+        self.db_tracks = state["db_tracks"]
+        self.query_tracks = state["query_tracks"]
+        self.alien_tracks = state["alien_tracks"]
+        self.query_offsets = state["query_offsets"]
+
+        print(f"Loaded benchmark state: {len(self.db_tracks)} DB tracks, {len(self.query_tracks)} positive queries, {len(self.alien_tracks)} negative queries.")
 
     def train(self, training_filepaths: list[str]) -> None:
         print(f"Training backends on {len(training_filepaths)} files.")
@@ -216,6 +393,29 @@ class BenchmarkRunner:
         return trials
 
     def run_experiment(self, test_cases: list[AudioTestCase], max_workers: int = 8) -> None:
+        """Runs the specified test cases across all backends."""
+        for case in test_cases:
+            print(f"\n--- Running Test Case: {case} ---")
+
+            # Positive Control: Query with tracks that should be in the DB
+            positive_queries = [(path, case, TestType.POSITIVE) for path in self.query_tracks]
+
+            # Negative Control: Query with tracks that are not in the DB
+            negative_queries = [(path, case, TestType.NEGATIVE) for path in self.alien_tracks]
+
+            all_queries = positive_queries + negative_queries
+            query_seeds = self.rng.integers(0, 2**32 - 1, size=len(all_queries))
+
+            results_generator = Parallel(n_jobs=max_workers, backend="loky", return_as="generator")(
+                delayed(self._run_single_query)(query[0], query[1], query[2], int(seed))
+                for query, seed in zip(all_queries, query_seeds)
+            )
+
+            for trials_dict in tqdm(results_generator, total=len(all_queries), desc=f"Querying ({str(case)})"):
+                for backend_name, trial in trials_dict.items():
+                    self.results[backend_name].add(trial)
+
+    def run_experiment_concurrently(self, test_cases: list[AudioTestCase], max_workers: int = 8) -> None:
         """Runs the specified test cases across all backends concurrently."""
         for case in test_cases:
             print(f"\n--- Running Test Case: {case} ---")
@@ -229,16 +429,29 @@ class BenchmarkRunner:
             all_queries = positive_queries + negative_queries
             query_seeds = self.rng.integers(0, 2**32 - 1, size=len(all_queries))
 
-            with ThreadPoolExecutor(max_workers=max_workers) as executor:
-                future_to_query = {
-                    executor.submit(self._run_single_query, query[0], query[1], query[2], seed): query
-                    for query, seed in zip(all_queries, query_seeds)
-                }
+            # Use ProcessPoolExecutor with an initializer to load the databases ONCE per worker
+            with ProcessPoolExecutor(max_workers=max_workers, initializer=_init_worker, initargs=(self.backends,)) as executor:
+                future_to_query = {}
 
-                # Process them as they complete to keep the progress bar updating
+                for query, seed in zip(all_queries, query_seeds):
+                    future = executor.submit(
+                        _worker_run_single_query,
+                        query_path=query[0],
+                        test_case=query[1],
+                        test_type=query[2],
+                        seed=int(seed),
+                        f_s=self.config.f_s,
+                        snippet_duration_sec=self.config.snippet_duration_sec,
+                        query_offset=self.query_offsets[query[0]],
+                        save_failed_queries=self.config.save_failed_queries,
+                        save_passed_queries=self.config.save_passed_queries,
+                        failed_dir=self.failed_dir,
+                        passed_dir=self.passed_dir
+                    )
+                    future_to_query[future] = query
+
                 for future in tqdm(as_completed(future_to_query), total=len(all_queries), desc=f"Querying ({str(case)})"):
                     trials_dict = future.result()
-
                     for backend_name, trial in trials_dict.items():
                         self.results[backend_name].add(trial)
 
@@ -270,3 +483,14 @@ class BenchmarkRunner:
                 decision_rule=backend.decision_rule,
                 metrics=metrics
             )
+
+    def get_valid_duration(self, filepath: str) -> float | None:
+        """Attempts to read the file and ensures it's long enough for a snippet."""
+        try:
+            duration = sf.info(filepath).duration
+            if duration >= self.config.snippet_duration_sec:
+                return duration
+            print(f"Skipping {filepath}: Duration ({duration:.2f}s) is shorter than snippet ({self.config.snippet_duration_sec}s).")
+        except Exception as e:
+            print(f"Skipping unreadable file {filepath}: {e}")
+        return None

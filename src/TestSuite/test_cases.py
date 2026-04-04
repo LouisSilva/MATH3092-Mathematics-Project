@@ -1,8 +1,7 @@
 ﻿from abc import ABC, abstractmethod
 
-import librosa
 import numpy as np
-from pedalboard import Reverb, Distortion, Clipping
+from pedalboard import Reverb, Distortion, Clipping, PitchShift
 
 
 class AudioTestCase(ABC):
@@ -54,7 +53,7 @@ class PitchShiftTest(AudioTestCase):
         super().__init__(n_steps=n_steps)
 
     def apply(self, audio: np.ndarray, sr: int, rng: np.random.Generator) -> np.ndarray:
-        return librosa.effects.pitch_shift(y=audio, sr=sr, n_steps=self.params['n_steps'])
+        return PitchShift(semitones=self.params['n_steps'])(audio, sr)
 
 
 class ReverbTest(AudioTestCase):
