@@ -264,8 +264,7 @@ class HashTable(object):
                 target sampling rate from Matlab file (must be 11025)
         """
         mht = scipy.io.loadmat(name)
-        params = {}
-        params['mat_version'] = mht['HT_params'][0][0][-1][0][0]
+        params = {'mat_version': mht['HT_params'][0][0][-1][0][0]}
         assert params['mat_version'] >= 0.9
         self.hashbits = _bitsfor(mht['HT_params'][0][0][0][0][0])
         self.depth = mht['HT_params'][0][0][1][0][0]

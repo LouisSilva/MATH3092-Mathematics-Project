@@ -36,6 +36,7 @@ class BenchmarkTrial:
     match_outcome: MatchOutcome
     query_time_s: float
     status: TestStatus
+    is_confident: bool = False
 
     @property
     def is_correct_id(self) -> bool:
@@ -53,10 +54,11 @@ class BenchmarkTrial:
             "Target ID": self.target_track_id,
             "Predicted ID": self.match_outcome.predicted_track_id,
             "Score": self.match_outcome.score,
-            "Score Name": self.match_outcome.score_name,
-            "Higher Is Better": self.match_outcome.higher_is_better,
+            "Score Name": self.match_outcome.score_name, # TODO: remove this
+            "Higher Is Better": self.match_outcome.higher_is_better, # TODO: remove this
             "Query Time (s)": self.query_time_s,
             "Status": self.status,
+            "Is Confident": self.is_confident
         }
 
         for key, value in self.match_outcome.metadata.items():

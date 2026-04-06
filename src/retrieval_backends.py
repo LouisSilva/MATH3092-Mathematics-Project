@@ -81,6 +81,11 @@ class RetrievalBackend(ABC):
         """ Returns ``True`` if this result is confident enough to be accepted as a match."""
         pass
 
+    @abstractmethod
+    def restrict_search_space(self, valid_track_ids: set[str]) -> None:
+        """Restricts the backend to only consider matches from the provided track IDs."""
+        pass
+
 
 class PCARetrievalBackend(RetrievalBackend):
     backend_name = "PCA"
@@ -97,6 +102,7 @@ class PCARetrievalBackend(RetrievalBackend):
         self.search_strategy = search_strategy
         self.confident_match_threshold = float(confident_match_threshold)
         self.db: dict[str, np.ndarray] = {}
+        self.valid_track_ids: set[str] | None = None
 
     @property
     def decision_rule(self) -> str:
@@ -140,6 +146,17 @@ class PCARetrievalBackend(RetrievalBackend):
         """Loads the database from a compressed NumPy archive."""
         with np.load(filepath, allow_pickle=True) as data:
             self.db = {str(k): v for k, v in data.items()}
+        self._apply_restriction()
+
+    def restrict_search_space(self, valid_track_ids: set[str]) -> None:
+        self.valid_track_ids = valid_track_ids
+        self._apply_restriction()
+
+    def _apply_restriction(self) -> None:
+        if self.valid_track_ids is not None and self.db:
+            original_size = len(self.db)
+            self.db = {k: v for k, v in self.db.items() if k in self.valid_track_ids}
+            print(f"PCA Backend: Restricted search space from {original_size} to {len(self.db)} tracks.")
 
     def search_from_file(self, audio: str) -> MatchOutcome:
         query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_file(audio)
@@ -185,27 +202,27 @@ class ShazamRetrievalBackend(RetrievalBackend):
     higher_is_better = True
 
     def __init__(
-        self,
-        *,
-        density: float = 20.0,
-        samplerate: int = 11025,
-        n_fft: int = 512,
-        shifts: int = 4,
-        pks_per_frame: int = 5,
-        fanout: int = 3,
-        freq_sd: float = 30.0,
-        match_win: int = 1,
-        min_count: int = 0,
-        max_matches: int = 1,
-        search_depth: int = 100,
-        sort_by_time: bool = False,
-        exact_count: bool = False,
-        hashbits: int = 20,
-        depth: int = 100,
-        maxtime: int = 16384,
-        verbose: bool = False,
-        fail_on_error: bool = True,
-        confident_match_threshold: int = 5,
+            self,
+            *,
+            density: float = 20.0,
+            hashbits: int = 20,
+            maxtime: int = 16384,
+            samplerate: int = 11025,
+            shifts: int = 4,
+            match_win: int = 1,
+            min_count: int = 0,
+            max_matches: int = 1,
+            freq_sd: float = 30.0,
+            fanout: int = 3,
+            pks_per_frame: int = 5,
+            search_depth: int = 100,
+            n_fft: int = 512,
+            sort_by_time: bool = False,
+            exact_count: bool = False,
+            depth: int = 100,
+            verbose: bool = False,
+            fail_on_error: bool = True,
+            confident_match_threshold: int = 5
     ):
         # Setup the analyzer
         analyzer = audfprint_analyze.Analyzer(density=density)
@@ -239,6 +256,7 @@ class ShazamRetrievalBackend(RetrievalBackend):
         self.hash_table.params["samplerate"] = samplerate
 
         self.confident_match_threshold = confident_match_threshold
+        self.valid_track_ids: set[str] | None = None
 
     @property
     def decision_rule(self) -> str:
@@ -274,7 +292,13 @@ class ShazamRetrievalBackend(RetrievalBackend):
 
     def load_database(self, filepath: str) -> None:
         """Loads the audfprint HashTable from disk."""
-        self.hash_table.load(filepath)
+        with gzip.open(filepath, 'rb') as f:
+            self.hash_table.load_pkl(filepath, file_object=f)
+
+    def restrict_search_space(self, valid_track_ids: set[str]) -> None:
+        self.valid_track_ids = valid_track_ids
+        # self.matcher.search_depth = 10000
+        print(f"Shazam Backend: Search space restricted to {len(valid_track_ids)} tracks.")
 
     def search_from_file(self, audio: str) -> MatchOutcome:
         query_hashes = self.analyzer.wavfile2hashes(audio)
@@ -295,6 +319,11 @@ class ShazamRetrievalBackend(RetrievalBackend):
             )
 
         results = self.matcher.match_hashes(self.hash_table, query_hashes)
+
+        # Filter results to only include valid tracks
+        if self.valid_track_ids is not None and results is not None and len(results) > 0:
+            results = [r for r in results if self.hash_table.names[int(r[0])] in self.valid_track_ids]
+
         if results is None or len(results) == 0:
             return MatchOutcome(
                 predicted_track_id=None,

@@ -106,15 +106,14 @@ def _worker_run_single_query(
 
                     benchmark_trial.query_time_s = end_time - start_time
                     benchmark_trial.match_outcome = match_outcome
-
-                    is_confident = backend.is_confident_match(match_outcome)
+                    benchmark_trial.is_confident = backend.is_confident_match(match_outcome)
 
                     if test_type == TestType.POSITIVE:
                         is_match = match_outcome.predicted_track_id == target_track_id
-                        benchmark_trial.status = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
+                        benchmark_trial.status = TestStatus.PASS if (is_match and benchmark_trial.is_confident) else TestStatus.FAIL
 
                     elif test_type == TestType.NEGATIVE:
-                        benchmark_trial.status = TestStatus.PASS if not is_confident else TestStatus.FAIL
+                        benchmark_trial.status = TestStatus.PASS if not benchmark_trial.is_confident else TestStatus.FAIL
 
                 except Exception as e:
                     print(f"Error processing {query_path} with {backend.backend_name}: {e}")
@@ -268,7 +267,7 @@ class BenchmarkRunner:
         print(f"Benchmark state saved to {filepath}")
 
     def load_state(self, filepath: str) -> None:
-        """Loads track selections and query offsets from disk, bypassing setup_database."""
+        """Loads benchmark runner state, bypassing setup_database."""
         with open(filepath, "r") as f:
             state = json.load(f)
 
@@ -276,6 +275,48 @@ class BenchmarkRunner:
         self.query_tracks = state["query_tracks"]
         self.alien_tracks = state["alien_tracks"]
         self.query_offsets = state["query_offsets"]
+
+        print(f"Loaded benchmark state: {len(self.db_tracks)} DB tracks, {len(self.query_tracks)} positive queries, {len(self.alien_tracks)} negative queries.")
+
+    def load_restricted_state(self, filepath: str) -> None:
+        """Loads benchmark runner state and downsamples it to match the current config, bypassing setup_database."""
+        with open(filepath, "r") as f:
+            state = json.load(f)
+
+        all_db = state["db_tracks"]
+        all_pos = state["query_tracks"]
+        all_neg = state["alien_tracks"]
+        all_offsets = state["query_offsets"]
+
+        # Downsample the DB tracks
+        if self.config.num_db_tracks < len(all_db):
+            self.db_tracks = list(self.rng.choice(all_db, self.config.num_db_tracks, replace=False))
+        else:
+            self.db_tracks = all_db
+
+        db_set = set(self.db_tracks)
+
+        # Downsample the positive queries (must exist in the new restricted DB)
+        valid_pos = [p for p in all_pos if p in db_set]
+        if self.config.num_positive_queries < len(valid_pos):
+            self.query_tracks = list(self.rng.choice(valid_pos, self.config.num_positive_queries, replace=False))
+        else:
+            self.query_tracks = valid_pos
+
+        # Downsample the negative queries (must not exist in the new restricted DB)
+        valid_neg = [p for p in all_neg if p not in db_set]
+        if self.config.num_negative_queries < len(valid_neg):
+            self.alien_tracks = list(self.rng.choice(valid_neg, self.config.num_negative_queries, replace=False))
+        else:
+            self.alien_tracks = valid_neg
+
+        # Filter offsets
+        self.query_offsets = {k: all_offsets[k] for k in self.query_tracks + self.alien_tracks}
+
+        # Restrict the search space of the backends
+        valid_track_ids = {Path(p).stem for p in self.db_tracks}
+        for backend in self.backends:
+            backend.restrict_search_space(valid_track_ids)
 
         print(f"Loaded benchmark state: {len(self.db_tracks)} DB tracks, {len(self.query_tracks)} positive queries, {len(self.alien_tracks)} negative queries.")
 
@@ -346,16 +387,15 @@ class BenchmarkRunner:
                     # Record the results
                     benchmark_trial.query_time_s = end_time - start_time
                     benchmark_trial.match_outcome = match_outcome
-
-                    is_confident = backend.is_confident_match(match_outcome) # TODO: Add this to the BenchmarkTrial object possibly
+                    benchmark_trial.is_confident = backend.is_confident_match(match_outcome)
 
                     # Process the different test types
                     if test_type == TestType.POSITIVE:
                         is_match = match_outcome.predicted_track_id == target_track_id
-                        benchmark_trial.status = TestStatus.PASS if (is_match and is_confident) else TestStatus.FAIL
+                        benchmark_trial.status = TestStatus.PASS if (is_match and benchmark_trial.is_confident) else TestStatus.FAIL
 
                     elif test_type == TestType.NEGATIVE:
-                        benchmark_trial.status = TestStatus.PASS if not is_confident else TestStatus.FAIL
+                        benchmark_trial.status = TestStatus.PASS if not benchmark_trial.is_confident else TestStatus.FAIL
 
                 except Exception as e:
                     print(f"Error processing {query_path} with {backend.backend_name}: {e}")
