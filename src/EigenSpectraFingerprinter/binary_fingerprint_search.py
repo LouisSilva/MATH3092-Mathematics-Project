@@ -9,7 +9,7 @@ class PCAFingerprintSearchStrategy(ABC):
     def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         pass
 
-class HammingSearch(PCAFingerprintSearchStrategy):
+class HammingSearchSlow(PCAFingerprintSearchStrategy):
     """
     Searches using a sliding window with Hamming distance.
     Use with binary fingerprints.
@@ -61,7 +61,7 @@ class HammingSearch(PCAFingerprintSearchStrategy):
         D_bar_H_min = D_H_min_best / norm_const
         return s_hat, D_bar_H_min
 
-class HammingSearchOptimized(PCAFingerprintSearchStrategy):
+class HammingSearch(PCAFingerprintSearchStrategy):
     """
     Searches using a sliding window with Hamming distance.
     Use with binary fingerprints.
@@ -70,36 +70,49 @@ class HammingSearchOptimized(PCAFingerprintSearchStrategy):
     def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         # Ensure fingerprints are bools
         Gamma_Q = query_fingerprint.astype(bool)
+
+        # Get dimensions and calculate the normalization constant
         M_Q, phi = Gamma_Q.shape
-        Q_packed = np.packbits(Gamma_Q, axis=1)
         norm_const = M_Q * phi
 
-        # Initialize values
+        # Instead of storing the binary fingerprint as an array of bytes,
+        # we compress every sequence of 8 boolean values into a single unsigned
+        # 8-bit integer (uint8), thereby reducing space complexity by a factor of 8
+        Gamma_Q_packed = np.packbits(Gamma_Q, axis=1)
+
+        # Initialize default values
         s_hat = None
         D_min_best = np.iinfo(np.int64).max
 
-        # Iterate through every track in the database
+        # Iterate through every song in the database
         for s, Gamma_s in db.items():
             Gamma_s = Gamma_s.astype(bool)
             M_s = Gamma_s.shape[0]
 
-            # Skip tracks that are shorter than the query
+            # Skip songs that are shorter than the query
             if M_Q > M_s:
                 continue
 
-            S_packed = np.packbits(Gamma_s.astype(bool), axis=1)
+            Gamma_s_packed = np.packbits(Gamma_s.astype(bool), axis=1)
 
+            # Instead of allocating memory and copying each
+            # Gamma_s[delta : delta + M_Q - 1, :] sub matrix to a new array,
+            # we use an optimized function coded in C which doesn't copy any data
             sliding_window = np.lib.stride_tricks.sliding_window_view(
-                S_packed, (M_Q, S_packed.shape[1])
+                Gamma_s_packed, (M_Q, Gamma_s_packed.shape[1])
             ).squeeze(axis=1)
-            xor = sliding_window ^ Q_packed
 
+            # Apply the XOR operator
+            xor = sliding_window ^ Gamma_Q_packed
+
+            # Count how many bits are set to 1
             D_all = np.bitwise_count(xor).sum(axis=(1, 2))
+
+            # Apply min and argmin
             D_min = D_all.min()
             if D_min < D_min_best:
                 s_hat = s
                 D_min_best = int(D_min)
-
 
         # If no track was checked, return null
         if s_hat is None:

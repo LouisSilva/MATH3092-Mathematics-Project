@@ -55,7 +55,7 @@ def compute_spectrogram_from_samples(
     return np.clip(mel_db_spectrogram_scaled, 0, 1).T
 
 
-def compute_spectrogram(
+def compute_spectrogram_from_file(
         file_path: str,
         f_s: int = 44100,
         L: int = 2048,

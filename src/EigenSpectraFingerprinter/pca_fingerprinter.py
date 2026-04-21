@@ -5,7 +5,7 @@ from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
-from .spectrogram_generation import compute_spectrogram, compute_spectrogram_from_samples, load_audio
+from .spectrogram_generation import compute_spectrogram_from_file, compute_spectrogram_from_samples, load_audio
 
 
 class FingerprintProjectionStrategy(ABC):
@@ -93,7 +93,7 @@ class PCAFingerprinter:
                 break
 
             # Select only a maximum of kappa segments
-            spectrogram = compute_spectrogram(file_path)
+            spectrogram = compute_spectrogram_from_file(file_path)
             max_allowed_segments = min(self.kappa, segments_remaining_before_max_size)
             if spectrogram.shape[0] > max_allowed_segments:
                 indices = np.random.choice(spectrogram.shape[0], max_allowed_segments, replace=False)
