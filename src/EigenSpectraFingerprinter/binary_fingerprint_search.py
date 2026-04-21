@@ -61,6 +61,54 @@ class HammingSearch(PCAFingerprintSearchStrategy):
         D_bar_H_min = D_H_min_best / norm_const
         return s_hat, D_bar_H_min
 
+class HammingSearchOptimized(PCAFingerprintSearchStrategy):
+    """
+    Searches using a sliding window with Hamming distance.
+    Use with binary fingerprints.
+    """
+
+    def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
+        # Ensure fingerprints are bools
+        Gamma_Q = query_fingerprint.astype(bool)
+        M_Q, phi = Gamma_Q.shape
+        Q_packed = np.packbits(Gamma_Q, axis=1)
+        norm_const = M_Q * phi
+
+        # Initialize values
+        s_hat = None
+        D_min_best = np.iinfo(np.int64).max
+
+        # Iterate through every track in the database
+        for s, Gamma_s in db.items():
+            Gamma_s = Gamma_s.astype(bool)
+            M_s = Gamma_s.shape[0]
+
+            # Skip tracks that are shorter than the query
+            if M_Q > M_s:
+                continue
+
+            S_packed = np.packbits(Gamma_s.astype(bool), axis=1)
+
+            sliding_window = np.lib.stride_tricks.sliding_window_view(
+                S_packed, (M_Q, S_packed.shape[1])
+            ).squeeze(axis=1)
+            xor = sliding_window ^ Q_packed
+
+            D_all = np.bitwise_count(xor).sum(axis=(1, 2))
+            D_min = D_all.min()
+            if D_min < D_min_best:
+                s_hat = s
+                D_min_best = int(D_min)
+
+
+        # If no track was checked, return null
+        if s_hat is None:
+            return None, float('inf')
+
+        # Normalize the distance
+        D_bar_min = D_min_best / norm_const
+        return s_hat, D_bar_min
+
 class FFTConvolveSearch(PCAFingerprintSearchStrategy):
     """
     Extremely fast search using 1D FFT Convolution.

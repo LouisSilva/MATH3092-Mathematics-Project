@@ -432,7 +432,7 @@ class BenchmarkRunner:
 
         return trials
 
-    def run_experiment(self, test_cases: list[AudioTestCase], max_workers: int = 8) -> None:
+    def run_experiment(self, test_cases: list[AudioTestCase]) -> None:
         """Runs the specified test cases across all backends."""
         for case in test_cases:
             print(f"\n--- Running Test Case: {case} ---")
@@ -446,12 +446,11 @@ class BenchmarkRunner:
             all_queries = positive_queries + negative_queries
             query_seeds = self.rng.integers(0, 2**32 - 1, size=len(all_queries))
 
-            results_generator = Parallel(n_jobs=max_workers, backend="loky", return_as="generator")(
-                delayed(self._run_single_query)(query[0], query[1], query[2], int(seed))
-                for query, seed in zip(all_queries, query_seeds)
-            )
+            counter = 0
+            for task in tqdm(all_queries, total=len(all_queries), desc=f"Querying ({str(case)})"):
+                trials_dict = self._run_single_query(*task, seed=query_seeds[counter])
+                counter += 1
 
-            for trials_dict in tqdm(results_generator, total=len(all_queries), desc=f"Querying ({str(case)})"):
                 for backend_name, trial in trials_dict.items():
                     self.results[backend_name].add(trial)
 
