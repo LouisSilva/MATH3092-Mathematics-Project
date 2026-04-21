@@ -44,6 +44,45 @@ class NegativeCount(Metric):
         return int(val) if val > 0 else None
 
 
+class AverageScoreCorrect(Metric):
+    name = "avg_score_correct"
+    label = "Average Score (Correct Prediction)"
+    fmt = ".4f"
+
+    def compute(self, df: pd.DataFrame) -> float | None:
+        pos = df[df["Test Type"] == TestType.POSITIVE]
+        correct = pos[pos["Predicted ID"] == pos["Target ID"]]
+        if correct.empty:
+            return None
+
+        return float(correct["Score"].mean())
+
+
+class AverageScoreWrong(Metric):
+    name = "avg_score_wrong"
+    label = "Average Score (Wrong Prediction)"
+    fmt = ".4f"
+
+    def compute(self, df: pd.DataFrame) -> float | None:
+        pos = df[df["Test Type"] == TestType.POSITIVE]
+        wrong = pos[pos["Predicted ID"] != pos["Target ID"]]
+        if wrong.empty:
+            return None
+        return float(wrong["Score"].mean())
+
+
+class AverageScoreNegative(Metric):
+    name = "avg_score_negative"
+    label = "Average Negative Score"
+    fmt = ".4f"
+
+    def compute(self, df: pd.DataFrame) -> float | None:
+        neg = df[df["Test Type"] == TestType.NEGATIVE]
+        if neg.empty:
+            return None
+        return float(neg["Score"].mean())
+
+
 class RawTop1Accuracy(Metric):
     """Threshold-independent accuracy. It measures if the correct track was the first result, regardless of confidence."""
     name = "raw_top1_accuracy_pct"
@@ -114,45 +153,6 @@ class Precision(Metric):
             return None
 
         return float(true_positives / (true_positives + total_false_positives) * 100)
-
-
-class AverageScoreCorrect(Metric):
-    name = "avg_score_correct"
-    label = "Average Score (Correct Prediction)"
-    fmt = ".4f"
-
-    def compute(self, df: pd.DataFrame) -> float | None:
-        pos = df[df["Test Type"] == TestType.POSITIVE]
-        correct = pos[pos["Predicted ID"] == pos["Target ID"]]
-        if correct.empty:
-            return None
-
-        return float(correct["Score"].mean())
-
-
-class AverageScoreWrong(Metric):
-    name = "avg_score_wrong"
-    label = "Average Score (Wrong Prediction)"
-    fmt = ".4f"
-
-    def compute(self, df: pd.DataFrame) -> float | None:
-        pos = df[df["Test Type"] == TestType.POSITIVE]
-        wrong = pos[pos["Predicted ID"] != pos["Target ID"]]
-        if wrong.empty:
-            return None
-        return float(wrong["Score"].mean())
-
-
-class AverageScoreNegative(Metric):
-    name = "avg_score_negative"
-    label = "Average Negative Score"
-    fmt = ".4f"
-
-    def compute(self, df: pd.DataFrame) -> float | None:
-        neg = df[df["Test Type"] == TestType.NEGATIVE]
-        if neg.empty:
-            return None
-        return float(neg["Score"].mean())
 
 
 class MeanQueryTime(Metric):
