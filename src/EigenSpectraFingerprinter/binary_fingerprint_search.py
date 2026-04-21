@@ -17,45 +17,49 @@ class HammingSearch(PCAFingerprintSearchStrategy):
 
     def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         # Ensure fingerprints are bools
-        query_fp = query_fingerprint.astype(bool)
-        query_len, n_features = query_fp.shape
-        total_bits = query_len * n_features
+        Gamma_Q = query_fingerprint.astype(bool)
+        M_Q, phi = Gamma_Q.shape
+        norm_const = M_Q * phi
 
         # Initialize values
-        best_min_dist = float('inf')
-        best_track = None
+        D_H_min_best = float('inf')
+        s_hat = None
 
         # Iterate through every track in the database
-        for track_id, track_fingerprint in db.items():
-            track_fp = track_fingerprint.astype(bool)
-            track_len = track_fp.shape[0]
+        for s, Gamma_s in db.items():
+            Gamma_s = Gamma_s.astype(bool)
+            M_s = Gamma_s.shape[0]
 
             # Skip tracks that are shorter than the query
-            if query_len > track_len:
+            if M_Q > M_s:
                 continue
 
             # Iterate through the set of possible offsets
-            for offset in range(track_len - query_len + 1):
+            D_H_min = float('inf')
+            for delta in range(M_s - M_Q + 1):
 
                 # Extract the segment of the track fingerprint to compare against
-                sub_matrix = track_fp[offset: offset + query_len]
+                Gamma_s_sub = Gamma_s[delta: delta + M_Q]
 
                 # Sum up all the bit mismatches
-                current_dist = np.sum(query_fp != sub_matrix)
+                D_H = np.sum(Gamma_Q != Gamma_s_sub)
 
-                # Minimize the distance
-                if current_dist < best_min_dist:
-                    best_min_dist = current_dist
-                    best_track = track_id
+                # Minimize the distance over all offsets
+                if D_H < D_H_min:
+                    D_H_min = D_H
+
+            # Track argmin over all songs
+            if D_H_min < D_H_min_best:
+                D_H_min_best = D_H_min
+                s_hat = s
 
         # If no track was checked, return null
-        if best_track is None:
+        if s_hat is None:
             return None, float('inf')
 
-        # Normalize the best distance
-        normalized_min_dist = best_min_dist / total_bits
-
-        return best_track, normalized_min_dist
+        # Normalize the distance
+        D_bar_H_min = D_H_min_best / norm_const
+        return s_hat, D_bar_H_min
 
 class FFTConvolveSearch(PCAFingerprintSearchStrategy):
     """
