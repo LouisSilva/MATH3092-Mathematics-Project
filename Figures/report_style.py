@@ -22,9 +22,11 @@ PLOT_CFG = {
     'grid_alpha': 0.18
 }
 
+
 def random_suffix(length=8):
     alphabet = string.ascii_lowercase + string.digits
     return ''.join(secrets.choice(alphabet) for _ in range(length))
+
 
 def set_report_style(width_pt, font_size=10, aspect_ratio=0.618, dpi=200):
     inches_per_pt = 1 / 72.27
@@ -156,14 +158,14 @@ def generate_figure_2_aliasing():
     fs = 5.0
     duration = 2.0
     f_base = 1.0
-    frequencies = [1, 6, 11, 16]
+    frequencies = [1, 6, 11] # [1, 6, 11, 16]
 
     ts = np.arange(0, duration + 1 / fs, 1 / fs)
     xn = np.cos(2 * np.pi * f_base * ts)
     t = np.linspace(0, duration, 8000)
 
     fig, axes = plt.subplots(len(frequencies), 1, sharex=True)
-    fig.suptitle("Aliasing: Different Continuous Signals Producing Identical Samples \n", y=0.965, fontsize=12)
+    fig.suptitle("Aliasing: Different Continuous Signals Producing Identical Samples", y=0.98, fontsize=12)
 
     for i, (ax, f) in enumerate(zip(axes, frequencies)):
         xt = np.cos(2 * np.pi * f * t)
@@ -184,15 +186,15 @@ def generate_figure_2_aliasing():
     custom_lines = [
         Line2D([0], [0], color=PLOT_CFG['primary'], lw=2.2, alpha=0.8),
         Line2D([0], [0], color=PLOT_CFG['secondary'], lw=2.2, alpha=0.8),
-        Line2D([0], [0], marker='o', color='w', markerfacecolor=PLOT_CFG['secondary'], markeredgecolor='white',
-               markersize=8, markeredgewidth=1.4)
     ]
-    fig.legend(custom_lines, [r'$x(t)$', r'$x[n]$'], loc='upper center', bbox_to_anchor=(0.5, 0.95), ncol=2,
-               framealpha=0.9)
+
+    fig.legend(custom_lines, [r'$x(t)$', r'$x[n]$'],
+               loc='upper center', bbox_to_anchor=(0.5, 0.93), ncol=2, framealpha=0.9, frameon=False)
+
     axes[-1].set_xlabel("Time (seconds)")
     plt.xlim(0, duration)
     fig.supylabel('Amplitude', x=0.04)
-    plt.subplots_adjust(top=0.9, hspace=0.22)
+    plt.subplots_adjust(top=0.86, hspace=0.22)
     save_figure(fig, "aliasing_fig")
 
 
@@ -266,10 +268,12 @@ def generate_figure_3_stft_partitioning():
 
     # L is drawn above the first frame
     length_correction = 0.009
-    draw_dim_line(ax2, ts[0] - length_correction, ts[L - 1] + length_correction, y=0.8, text=fr"$L = {L}$", text_offset=0.15)
+    draw_dim_line(ax2, ts[0] - length_correction, ts[L - 1] + length_correction, y=0.8, text=fr"$L = {L}$",
+                  text_offset=0.15)
 
     # H is drawn in the gap between the start of m=0 and m=1
-    draw_dim_line(ax2, ts[0] - length_correction, ts[H] + length_correction, y=-0.8, text=fr"$H = {H}$", text_offset=-0.20)
+    draw_dim_line(ax2, ts[0] - length_correction, ts[H] + length_correction, y=-0.8, text=fr"$H = {H}$",
+                  text_offset=-0.20)
 
     # Configure the left axis ticks
     ax2.set_yticks([-m for m in range(num_frames)])
@@ -369,7 +373,7 @@ def generate_figure_6_mel_mapping():
     save_figure(fig, "mel_scale_mapping")
 
 
-def generate_figure_7_mel_filterbank():
+def generate_figure_7_mel_filterbank(show_highlight_plus_2=False):
     set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.6, dpi=250)
     plt.style.use("seaborn-v0_8-whitegrid")
 
@@ -397,12 +401,21 @@ def generate_figure_7_mel_filterbank():
     highlight_i_plus_2 = highlight_i + 2
 
     for i in range(B):
-        color = PLOT_CFG['primary'] if i == highlight_i else (
-            PLOT_CFG['highlight'] if i == highlight_i_plus_2 else "#c7c7c7")
-        lw, alpha = (2.8, 1.0) if i in [highlight_i, highlight_i_plus_2] else (1.1, 0.35)
-        zord = 4 if i in [highlight_i, highlight_i_plus_2] else 1
+        is_primary = (i == highlight_i)
+        is_secondary = (i == highlight_i_plus_2) and show_highlight_plus_2
+
+        if is_primary:
+            color = PLOT_CFG['primary']
+        elif is_secondary:
+            color = PLOT_CFG['highlight']
+        else:
+            color = "#c7c7c7"
+
+        lw, alpha = (2.8, 1.0) if (is_primary or is_secondary) else (1.1, 0.35)
+        zord = 4 if (is_primary or is_secondary) else 1
+
         line, = ax.plot(fft_freqs, filters[i, :], linewidth=lw, color=color, alpha=alpha, zorder=zord)
-        if i == highlight_i:
+        if is_primary:
             highlight_line = line
 
     for j in range(B + 2):
@@ -413,10 +426,9 @@ def generate_figure_7_mel_filterbank():
     # Red interval showing base width
     y_dq = -0.005
     draw_horizontal_interval(ax, x_center, x_right, y_dq, "")
-    ax.text(0.56 * (x_left + x_right), y_dq + 0.04, r"$\Delta q_i$", color="black", fontsize=11, ha="center",
+    ax.text(0.57 * (x_left + x_right), y_dq + 0.04, r"$\Delta q_i$", color="black", fontsize=11, ha="center",
             va="bottom", zorder=8, bbox=dict(facecolor="white", edgecolor="none", alpha=0.75, pad=0.075))
 
-    # Fix: Replaced undefined arrays with explicit declaration corresponding to the left, center, and right vertices of the highlighted triangle
     vertex_x = [x_left, x_center, x_right]
     vertex_y = [0, 1, 0]
     vertex_labels = [r"$c_{i-1}$", r"$c_i$", r"$c_{i+1}$"]
@@ -426,9 +438,9 @@ def generate_figure_7_mel_filterbank():
 
     for x, y, lab, off, ha, va in zip(vertex_x, vertex_y, vertex_labels, vertex_offsets, vertex_has, vertex_vas):
         ax.scatter(x, y, s=38, color=PLOT_CFG['secondary'], edgecolor="white", linewidth=0.8, zorder=5)
-        ax.annotate(lab, xy=(x, y), xytext=off, textcoords="offset points", fontsize=9, ha=ha, va=va,
-                    bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=0.12),
-                    arrowprops=dict(arrowstyle="->", color="#555555", lw=0.8, shrinkA=2, shrinkB=3, alpha=0), zorder=6)
+        # ax.annotate(lab, xy=(x, y), xytext=off, textcoords="offset points", fontsize=9, ha=ha, va=va,
+        #             bbox=dict(facecolor="white", edgecolor="none", alpha=0.9, pad=0.12),
+        #             arrowprops=dict(arrowstyle="->", color="#555555", lw=0.8, shrinkA=2, shrinkB=3, alpha=0), zorder=6)
 
     ax.annotate(rf"$B={B}$ triangular filters", xy=(0.985, 0.96), xycoords="axes fraction", ha="right", va="top",
                 fontsize=9, bbox=dict(facecolor="white", edgecolor="none", alpha=0.85, pad=0.15), zorder=7)
@@ -530,8 +542,7 @@ def generate_figure_8_gibbs():
 
 
 if __name__ == "__main__":
-    generate_figure_3_stft_partitioning()
-
+    generate_figure_2_aliasing()
 
 # if __name__ == "__main__":
 #     generate_figure_1_sampling()
@@ -548,4 +559,3 @@ if __name__ == "__main__":
 #
 #     generate_figure_6_mel_mapping()
 #     generate_figure_7_mel_filterbank()
-

@@ -5,8 +5,8 @@ from pathlib import Path
 import gzip
 
 from src.TestSuite.data_structures import MatchOutcome
-from src.EigenSpectraFingerprinter.pca_fingerprinter import PCAFingerprinter
-from src.EigenSpectraFingerprinter.binary_fingerprint_search import PCAFingerprintSearchStrategy
+from src.PCAFingerprinter.pca_fingerprinter import PCAFingerprinter
+from src.PCAFingerprinter.binary_fingerprint_search import PCAFingerprintSearchStrategy
 
 from vendor.audfprint import audfprint_analyze, audfprint_match, hash_table
 

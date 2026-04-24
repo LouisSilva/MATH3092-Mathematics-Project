@@ -124,7 +124,7 @@ class HammingSearch(PCAFingerprintSearchStrategy):
 
 class FFTConvolveSearch(PCAFingerprintSearchStrategy):
     """
-    Extremely fast search using 1D FFT Convolution.
+    Search using 1D FFT Convolution.
     Flattens the 2D fingerprints and computes correlation in one go.
     """
 

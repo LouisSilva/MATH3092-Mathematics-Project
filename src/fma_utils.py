@@ -89,7 +89,7 @@ def load_custom_paths(directory: str | Path) -> pd.DataFrame:
 def create_dataset_df(
         fma_metadata_dir: str | Path,
         fma_audio_files_dir: str | Path,
-        custom_audio_dir: str | Path
+        custom_audio_dir: str | Path | None = None
 ):
     tracks = load_fma_csv(Path(fma_metadata_dir) / "tracks.csv")
 
@@ -99,7 +99,9 @@ def create_dataset_df(
 
     print(f"Tracks with valid audio files: {len(tracks)}")
 
-    my_songs = load_custom_paths(custom_audio_dir)
-    print(f"Custom songs found: {len(my_songs)}")
+    my_songs = None
+    if custom_audio_dir is not None:
+        my_songs = load_custom_paths(custom_audio_dir)
+        print(f"Custom songs found: {len(my_songs)}")
 
     return tracks, my_songs
