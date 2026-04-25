@@ -482,7 +482,7 @@ def generate_figure_7_mel_filterbank(show_highlight_plus_2=False):
 def generate_figure_8_gibbs():
     set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.5)
 
-    # 1. Generate a segment where the start and end values do not match
+    # Generate a segment where the start and end values do not match
     N = 1000
     t_seg = np.linspace(0, 1, N, endpoint=False)
 
@@ -490,10 +490,10 @@ def generate_figure_8_gibbs():
     # This guarantees a maximum jump discontinuity at the segment boundaries upon periodic extension.
     ideal_seg = np.cos(np.pi * t_seg)
 
-    # 2. Compute the DFT of the segment
+    # Compute the DFT of the segment
     X = np.fft.fft(ideal_seg)
 
-    # 3. Reconstruct the continuous signal over an extended range to show periodic boundary ringing
+    # Reconstruct the continuous signal over an extended range to show periodic boundary ringing
     t_ext = np.linspace(-0.25, 1.25, 1500)
     K_high = 30
     recon_high = np.zeros_like(t_ext, dtype=complex)
@@ -505,7 +505,6 @@ def generate_figure_8_gibbs():
 
     recon_high = recon_high.real
 
-    # 4. Plotting
     fig, ax = plt.subplots(1, 1)
 
     ax.spines['top'].set_visible(False)

@@ -3,7 +3,21 @@ from typing import Any
 
 import pandas as pd
 
-from .enums import TestType
+from .enums import TestType, TestStatus
+
+
+def _exclude_errors(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Drops trials that crashed before producing a real result.
+
+    Errored trials carry placeholder values (predicted_track_id=None,
+    is_confident=False, query_time_s=0) that would silently bias every
+    metric: a crash on a positive query would look like a recall miss,
+    a crash on a negative query would look like a true negative, and
+    query_time_s=0 would pull the mean down. Crashes are reported
+    separately via ``ErrorRate``.
+    """
+    return df[df["Status"] != TestStatus.ERROR]
 
 
 class Metric(ABC):
@@ -44,12 +58,35 @@ class NegativeCount(Metric):
         return int(val) if val > 0 else None
 
 
+class ErrorCount(Metric):
+    """Number of trials that crashed before producing a result."""
+    name = "n_errors"
+    label = "Errored Queries"
+
+    def compute(self, df: pd.DataFrame) -> int | None:
+        val = (df["Status"] == TestStatus.ERROR).sum()
+        return int(val) if val > 0 else None
+
+
+class ErrorRate(Metric):
+    """Percentage of trials that crashed before producing a result."""
+    name = "error_rate_pct"
+    label = "Error Rate (%)"
+    fmt = ".2f"
+
+    def compute(self, df: pd.DataFrame) -> float | None:
+        if df.empty:
+            return None
+        return float((df["Status"] == TestStatus.ERROR).mean() * 100)
+
+
 class AverageScoreCorrect(Metric):
     name = "avg_score_correct"
     label = "Average Score (Correct Prediction)"
     fmt = ".4f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
         pos = df[df["Test Type"] == TestType.POSITIVE]
         correct = pos[pos["Predicted ID"] == pos["Target ID"]]
         if correct.empty:
@@ -64,6 +101,7 @@ class AverageScoreWrong(Metric):
     fmt = ".4f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
         pos = df[df["Test Type"] == TestType.POSITIVE]
         wrong = pos[pos["Predicted ID"] != pos["Target ID"]]
         if wrong.empty:
@@ -77,6 +115,7 @@ class AverageScoreNegative(Metric):
     fmt = ".4f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
         neg = df[df["Test Type"] == TestType.NEGATIVE]
         if neg.empty:
             return None
@@ -90,6 +129,7 @@ class RawTop1Accuracy(Metric):
     fmt = ".2f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
         pos = df[df["Test Type"] == TestType.POSITIVE]
         if pos.empty:
             return None
@@ -103,13 +143,13 @@ class TruePositiveRate(Metric):
     fmt = ".2f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
         pos = df[df["Test Type"] == TestType.POSITIVE]
         if pos.empty:
             return None
 
         is_true_positive = (pos["Predicted ID"] == pos["Target ID"]) & pos["Is Confident"]
         return float(is_true_positive.mean() * 100)
-        # return float((pos["Status"] == TestStatus.PASS).mean() * 100)
 
 
 class FalsePositiveRate(Metric):
@@ -119,12 +159,12 @@ class FalsePositiveRate(Metric):
     fmt = ".2f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
         neg = df[df["Test Type"] == TestType.NEGATIVE]
         if neg.empty:
             return None
 
         return float(neg["Is Confident"].mean() * 100)
-        # return float((neg["Status"] == TestStatus.FAIL).mean() * 100)
 
 
 class Precision(Metric):
@@ -134,6 +174,8 @@ class Precision(Metric):
     fmt = ".2f"
 
     def compute(self, df: pd.DataFrame) -> float | None:
+        df = _exclude_errors(df)
+
         # True positives: confident match AND correct ID
         true_positives = ((df["Test Type"] == TestType.POSITIVE) &
                           df["Is Confident"] &
@@ -173,4 +215,5 @@ DEFAULT_METRICS = [
     FalsePositiveRate(),
     Precision(),
     MeanQueryTime(),
+    ErrorRate(),
 ]
