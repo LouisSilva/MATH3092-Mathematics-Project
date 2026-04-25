@@ -43,7 +43,6 @@ class WhiteNoiseTest(AudioTestCase):
 
         noisy_audio_samples = audio + white_noise_samples
         return noisy_audio_samples
-        # return np.clip(noisy_audio_samples, -1, 1)
 
 
 class PitchShiftTest(AudioTestCase):
