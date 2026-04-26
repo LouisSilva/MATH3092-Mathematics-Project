@@ -1,4 +1,4 @@
-﻿from enum import Enum
+from enum import Enum
 
 class TestType(Enum):
     POSITIVE = "Positive"  # Query is in the DB

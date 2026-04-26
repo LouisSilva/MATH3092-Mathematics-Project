@@ -1,4 +1,4 @@
-﻿from abc import ABC, abstractmethod
+from abc import ABC, abstractmethod
 
 import numpy as np
 from pedalboard import Reverb, Distortion, Clipping, PitchShift

@@ -1,4 +1,4 @@
-﻿import ast
+import ast
 from pathlib import Path
 
 import pandas as pd

@@ -23,10 +23,6 @@ if sys.version_info[0] >= 3:
     import pickle  # Py3
     basestring = (str, bytes)  # Py3
     pickle_options = {'encoding': 'latin1'}
-else:
-    # Python 2 specific definitions
-    import cPickle as pickle  # Py2
-    pickle_options = {}
 
 
 # Current format version

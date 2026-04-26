@@ -29,12 +29,7 @@ import audfprint_match
 import hash_table
 
 
-if sys.version_info[0] >= 3:
-    # Python 3 specific definitions
-    time_clock = time.process_time
-else:
-    # Python 2 specific definitions
-    time_clock = time.clock
+time_clock = time.process_time
 
 
 def filename_list_iterator(filelist, wavdir, wavext, listflag):

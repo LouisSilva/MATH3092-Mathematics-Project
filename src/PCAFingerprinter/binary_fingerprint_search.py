@@ -1,4 +1,4 @@
-﻿import numpy as np
+import numpy as np
 from abc import ABC, abstractmethod
 from scipy.signal import convolve
 
@@ -129,18 +129,18 @@ class FFTConvolveSearch(PCAFingerprintSearchStrategy):
     """
 
     def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
-        # query shape: (Q, F)
+        # Query shape: (Q, F)
         Q, F = query_fingerprint.shape
         total_bits = Q * F
 
-        # Pre-process Query
+        # Pre-process query
         # Convert {0, 1} -> {-1, 1}
         query_bipolar = 2 * query_fingerprint.astype(np.float32) - 1
 
-        # FLATTEN to 1D
+        # Flatten to 1D
         query_flat = query_bipolar.flatten()
 
-        # REVERSE for convolution -> correlation equivalence
+        # Reverse for convolution -> correlation equivalence
         query_flat = query_flat[::-1]
 
         best_dist = float('inf')
@@ -152,23 +152,22 @@ class FFTConvolveSearch(PCAFingerprintSearchStrategy):
             if Q > T:
                 continue
 
-            # Pre-process Track
+            # Pre-process track
             track_bipolar = 2 * track_fingerprint.astype(np.float32) - 1
             track_flat = track_bipolar.flatten()
 
-            # FFT Convolution
-            # mode='valid' returns only overlaps where query fits inside track
+            # FFT convolution, mode='valid' returns only overlaps where query fits inside track
             correlation = convolve(track_flat, query_flat, mode='valid', method='fft')
 
             # Extract valid alignments. Because we flattened, 'valid' convolution produces results for shifts of 1 element, 2 elements, etc.
             # We only care about shifts of exactly F (one whole time step).
-            # We take every F-th element.
+            # Take every F-th element.
             valid_correlations = correlation[::F]
 
             if valid_correlations.size == 0:
                 continue
 
-            # Calculate Distances
+            # Calculate distances
             max_corr = np.max(valid_correlations)
             min_hamming_dist = (total_bits - max_corr) / 2.0
             normalized_dist = min_hamming_dist / total_bits
