@@ -33,12 +33,12 @@ class DeltaFingerprint(FingerprintProjectionStrategy):
 
     def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
         # Subtract previous row from current row
-        delta = projected_matrix[1:] - projected_matrix[:-1]
+        Delta_P = projected_matrix[1:] - projected_matrix[:-1]
 
         # Binarize based on the sign
-        binary_fingerprint = (delta > 0).astype(int)
+        Gamma = (Delta_P > 0).astype(int)
 
-        return binary_fingerprint
+        return Gamma
 
 
 class PCAFingerprinter:
@@ -83,7 +83,8 @@ class PCAFingerprinter:
         np.random.shuffle(file_list)
 
         # Calculate the estimated number of files that will be used to create the matrix, for the tqdm loading bar
-        estimated_num_files = min(len(file_list) * self.kappa, self.gamma) // self.kappa
+        rho = len(file_list)
+        estimated_num_files = min(rho * self.kappa, self.gamma) // self.kappa
 
         for file_path in tqdm(file_list, total=estimated_num_files, desc="Creating training data matrix for PCA"):
             # Only allow a max of gamma rows
@@ -103,7 +104,7 @@ class PCAFingerprinter:
             training_segments.append(spectrogram)
             total_segments += spectrogram.shape[0]
 
-        # Vertically stack all segments: (gamma, B)
+        # Vertically stack all segments: (M_t, B)
         T = np.vstack(training_segments)
 
         print(f"Fitting model on training matrix with shape: {T.shape}...")
