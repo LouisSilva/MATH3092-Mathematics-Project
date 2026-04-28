@@ -1,44 +1,11 @@
 import joblib
 import numpy as np
 from tqdm import tqdm
-from abc import ABC, abstractmethod
 import matplotlib.pyplot as plt
 from sklearn.decomposition import PCA
 
 from .spectrogram_generation import compute_spectrogram_from_file, compute_spectrogram_from_samples, load_audio
-
-
-class FingerprintProjectionStrategy(ABC):
-    """An interface for converting a projected matrix into a fingerprint."""
-
-    @abstractmethod
-    def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
-        pass
-
-
-class MedianThresholdingFingerprint(FingerprintProjectionStrategy):
-    """Generates a binary fingerprint using median-thresholding."""
-
-    def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
-        # Find the median of each row
-        medians = np.median(projected_matrix, axis=1, keepdims=True)
-
-        # Compare each component to the median of its segment
-        binary_fingerprint = projected_matrix > medians
-        return binary_fingerprint
-
-
-class DeltaFingerprint(FingerprintProjectionStrategy):
-    """Generates a binary fingerprint using temporal difference (delta features)."""
-
-    def generate(self, projected_matrix: np.ndarray) -> np.ndarray:
-        # Subtract previous row from current row
-        Delta_P = projected_matrix[1:] - projected_matrix[:-1]
-
-        # Binarize based on the sign
-        Gamma = (Delta_P > 0).astype(int)
-
-        return Gamma
+from .fingerprint_binarization import FingerprintProjectionStrategy
 
 
 class PCAFingerprinter:
@@ -94,7 +61,16 @@ class PCAFingerprinter:
                 break
 
             # Select only a maximum of kappa segments
-            spectrogram = compute_spectrogram_from_file(file_path)
+            spectrogram = compute_spectrogram_from_file(
+                file_path,
+                f_s=self.f_s,
+                L=self.L,
+                H=self.H,
+                B=self.B,
+                window_type=self.window_type,
+                tau=self.tau
+            )
+
             max_allowed_segments = min(self.kappa, segments_remaining_before_max_size)
             if spectrogram.shape[0] > max_allowed_segments:
                 indices = np.random.choice(spectrogram.shape[0], max_allowed_segments, replace=False)
