@@ -1,7 +1,8 @@
-﻿/Figures/Figures
+﻿/figures/temp
 /temp_queries
 /data
 /data_backup
+/notebooks
 
 /vendor/audfprint/tests/data
 

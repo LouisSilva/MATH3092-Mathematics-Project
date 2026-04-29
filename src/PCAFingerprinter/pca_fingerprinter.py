@@ -16,10 +16,10 @@ class PCAFingerprinter:
             L: int = 4096,
             H: int = 2048,
             B: int = 128,
-            tau: int = 80,
             window_type: str = "hann",
-            gamma: int = 50000,
+            tau: int = 80,
             kappa: int = 50,
+            gamma: int = 50000,
             phi: int = 16,
             random_state: int = 42,
     ):
@@ -28,10 +28,10 @@ class PCAFingerprinter:
         self.L = L
         self.H = H
         self.B = B
-        self.tau = tau
         self.window_type = window_type
-        self.gamma = gamma
+        self.tau = tau
         self.kappa = kappa
+        self.gamma = gamma
         self.phi = phi
         self.random_state = random_state
 
@@ -101,10 +101,10 @@ class PCAFingerprinter:
                 "L": self.L,
                 "H": self.H,
                 "B": self.B,
-                "tau": self.tau,
                 "window_type": self.window_type,
-                "gamma": self.gamma,
+                "tau": self.tau,
                 "kappa": self.kappa,
+                "gamma": self.gamma,
                 "phi": self.phi,
                 "random_state": self.random_state
             },
@@ -136,16 +136,25 @@ class PCAFingerprinter:
         audio, sr = load_audio(filepath, self.f_s)
         return self.get_fingerprint_from_samples(audio)
 
-    def get_fingerprint_from_samples(self, audio: np.ndarray) -> np.ndarray:
+    def get_fingerprint_from_samples(self, x: np.ndarray) -> np.ndarray:
         """
         Generates a fingerprint.
-        :arg audio: The numpy array of samples to fingerprint.
+        :arg x: The numpy array of samples to fingerprint.
         :returns: Low-dimensional representation of the given audio's spectrogram, a matrix with dimensions (``M``, ``phi``).
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before fingerprinting.")
 
-        spectrogram = compute_spectrogram_from_samples(audio, self.L, self.H, self.B, self.tau, self.window_type)
+        spectrogram = compute_spectrogram_from_samples(
+            x=x,
+            f_s=self.f_s,
+            L=self.L,
+            H=self.H,
+            B=self.B,
+            window_type=self.window_type,
+            tau=self.tau
+        )
+
         compressed = self.model.transform(spectrogram)
         return self.fingerprint_strategy.generate(compressed)
 

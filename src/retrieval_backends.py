@@ -96,7 +96,7 @@ class PCARetrievalBackend(RetrievalBackend):
             self,
             fingerprinter: PCAFingerprinter,
             search_strategy: PCAFingerprintSearchStrategy,
-            confident_match_threshold: float = 0.35
+            confident_match_threshold: float = 0.4
     ):
         self.fingerprinter = fingerprinter
         self.search_strategy = search_strategy
