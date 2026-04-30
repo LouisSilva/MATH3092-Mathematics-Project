@@ -43,8 +43,8 @@ class PCAFingerprinter:
         Fits the PCA basis using a random subset of segments from the training files.
         :arg file_list: List of audio files used to create the training matrix.
         """
-        training_segments = []
-        total_segments = 0
+        T_rows = []
+        M_kappa = 0
 
         # Shuffle the file list to avoid biasing towards the files at the beginning of the dataset
         np.random.shuffle(file_list)
@@ -55,13 +55,13 @@ class PCAFingerprinter:
 
         for file_path in tqdm(file_list, total=estimated_num_files, desc="Creating training data matrix for PCA"):
             # Only allow a max of gamma rows
-            segments_remaining_before_max_size = self.gamma - total_segments
-            if segments_remaining_before_max_size <= 0:
+            gamma_remaining = self.gamma - M_kappa
+            if gamma_remaining <= 0:
                 print(f"Reached the limit of gamma={self.gamma} training segments.")
                 break
 
             # Select only a maximum of kappa segments
-            spectrogram = compute_spectrogram_from_file(
+            S = compute_spectrogram_from_file(
                 file_path,
                 f_s=self.f_s,
                 L=self.L,
@@ -71,17 +71,17 @@ class PCAFingerprinter:
                 tau=self.tau
             )
 
-            max_allowed_segments = min(self.kappa, segments_remaining_before_max_size)
-            if spectrogram.shape[0] > max_allowed_segments:
-                indices = np.random.choice(spectrogram.shape[0], max_allowed_segments, replace=False)
-                spectrogram = spectrogram[indices]
+            per_song_cap = min(self.kappa, gamma_remaining)
+            if S.shape[0] > per_song_cap:
+                I_s = np.random.choice(S.shape[0], per_song_cap, replace=False)
+                S = S[I_s]
 
             # Append these segments to the training matrix
-            training_segments.append(spectrogram)
-            total_segments += spectrogram.shape[0]
+            T_rows.append(S)
+            M_kappa += S.shape[0]
 
         # Vertically stack all segments: (M_t, B)
-        T = np.vstack(training_segments)
+        T = np.vstack(T_rows)
 
         print(f"Fitting model on training matrix with shape: {T.shape}...")
         self.model.fit(T)  # The model centres itself for us
@@ -116,7 +116,7 @@ class PCAFingerprinter:
 
     @classmethod
     def load_model(cls, filepath: str) -> "PCAFingerprinter":
-        """Factory method to load a trained model from disk and reconstruct its configuration."""
+        """Factory method to load a trained model from disk and load its configuration."""
         state = joblib.load(filepath)
 
         instance = cls(fingerprint_strategy=state["fingerprint_strategy"], **state["hyperparameters"])
@@ -127,25 +127,25 @@ class PCAFingerprinter:
     def get_fingerprint_from_file(self, filepath: str) -> np.ndarray:
         """
         Generates a fingerprint.
-        :arg filepath: The filepath to the audio to be fingerprinted.
-        :returns: Low-dimensional representation of the given audio's spectrogram, a matrix with dimensions (``M``, ``phi``).
+        :arg filepath: Filepath of the audio to be fingerprinted.
+        :returns: Low-dimensional representation of the given audio's sample vector, a matrix with dimensions (``M``, ``phi``).
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before fingerprinting.")
 
-        audio, sr = load_audio(filepath, self.f_s)
-        return self.get_fingerprint_from_samples(audio)
+        x, _ = load_audio(filepath, self.f_s)
+        return self.get_fingerprint_from_samples(x)
 
     def get_fingerprint_from_samples(self, x: np.ndarray) -> np.ndarray:
         """
         Generates a fingerprint.
-        :arg x: The numpy array of samples to fingerprint.
-        :returns: Low-dimensional representation of the given audio's spectrogram, a matrix with dimensions (``M``, ``phi``).
+        :arg x: NumPy array of samples to fingerprint.
+        :returns: Low-dimensional representation of the given audio's sample vector, a matrix with dimensions (``M``, ``phi``).
         """
         if not self.is_fitted:
             raise RuntimeError("Model must be trained before fingerprinting.")
 
-        spectrogram = compute_spectrogram_from_samples(
+        S = compute_spectrogram_from_samples(
             x=x,
             f_s=self.f_s,
             L=self.L,
@@ -155,8 +155,9 @@ class PCAFingerprinter:
             tau=self.tau
         )
 
-        compressed = self.model.transform(spectrogram)
-        return self.fingerprint_strategy.generate(compressed)
+        P = self.model.transform(S)
+        Gamma = self.fingerprint_strategy.generate(P)
+        return Gamma
 
     def plot_scree(self, cumulative: bool = True) -> None:
         """
@@ -164,20 +165,20 @@ class PCAFingerprinter:
         :arg cumulative: Whether to display the cumulative explained variance.
         """
         if not self.is_fitted:
-            raise RuntimeError("SVD must be trained before plotting scree plot.")
+            raise RuntimeError("Model must be trained before plotting scree plot.")
 
-        evr = self.model.explained_variance_ratio_
-        x = np.arange(1, len(evr) + 1)
+        explained_variance = self.model.explained_variance_ratio_
+        x_axis = np.arange(1, len(explained_variance) + 1)
 
         plt.figure(figsize=(7, 4))
-        plt.plot(x, evr, marker="o", label="Per-component")
+        plt.plot(x_axis, explained_variance, marker="o", label="Per-component")
 
         if cumulative:
-            plt.plot(x, np.cumsum(evr), marker="s", label="Cumulative")
+            plt.plot(x_axis, np.cumsum(explained_variance), marker="s", label="Cumulative")
 
         plt.xlabel("Component")
         plt.ylabel("Explained Variance Ratio")
-        plt.title("SVD Scree Plot")
+        plt.title("Scree Plot")
         plt.legend()
         plt.grid(True, alpha=0.3)
         plt.tight_layout()

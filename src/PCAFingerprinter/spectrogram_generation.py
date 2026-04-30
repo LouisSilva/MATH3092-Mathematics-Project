@@ -17,10 +17,10 @@ def load_audio(
     :arg f_s: The sampling rate to use for loading the audio.
     :arg offset: Start time (seconds) to begin loading from.
     :arg duration: Maximum duration (seconds) of the audio to load. If ``None``, then it will load until the end of the file.
-    :returns: A tuple ``(x, sr)`` where ``x`` is the audio array and ``sr`` is the sampling rate.
+    :returns: A tuple ``(x, f_s_returned)`` where ``x`` is the audio array and ``f_s_returned`` is the sampling rate.
     """
-    x, sr = librosa.load(file_path, sr=f_s, mono=True, offset=offset, duration=duration)
-    return x, sr
+    x, f_s_returned = librosa.load(file_path, sr=f_s, mono=True, offset=offset, duration=duration)
+    return x, f_s_returned
 
 
 def compute_spectrogram_from_samples(
@@ -44,7 +44,7 @@ def compute_spectrogram_from_samples(
     :arg tau: The decibel limit.
     :returns: A spectrogram with shape ``(M, B)`` where the values lie in the range ``[0, 1]``.
     """
-    mel_spectrogram = librosa.feature.melspectrogram(
+    S_mel = librosa.feature.melspectrogram(
         y=x,
         sr=f_s,
         n_fft=L,
@@ -55,13 +55,13 @@ def compute_spectrogram_from_samples(
     )
 
     # Convert to dB
-    mel_db_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max, top_db=tau)
+    S_db = librosa.power_to_db(S_mel, ref=np.max, top_db=tau)
 
     # Map [-top_db, 0] to [0, 1]
-    mel_db_spectrogram_scaled = (mel_db_spectrogram + tau) / tau
+    S = (S_db + tau) / tau
 
     # Clip to ensure 0-1 bounds
-    return np.clip(mel_db_spectrogram_scaled, 0, 1).T
+    return np.clip(S, 0, 1).T
 
 
 def compute_spectrogram_from_file(
