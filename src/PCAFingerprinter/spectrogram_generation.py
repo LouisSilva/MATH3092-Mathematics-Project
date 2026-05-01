@@ -93,5 +93,5 @@ def compute_spectrogram_from_file(
         H=H,
         B=B,
         window_type=window_type,
-        tau=tau,
+        tau=tau
     )
