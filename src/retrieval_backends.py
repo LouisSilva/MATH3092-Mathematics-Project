@@ -10,6 +10,7 @@ from src.PCAFingerprinter.binary_fingerprint_search import PCAFingerprintSearchS
 
 from vendor.audfprint import audfprint_analyze, audfprint_match, hash_table
 
+
 class RetrievalBackend(ABC):
     """
     An interface for retrieval systems.
@@ -69,7 +70,7 @@ class RetrievalBackend(ABC):
         pass
 
     @abstractmethod
-    def search_from_samples(self, audio: np.ndarray, sr: float) -> MatchOutcome: # TODO: write docstring
+    def search_from_samples(self, audio: np.ndarray, sr: float) -> MatchOutcome:  # TODO: write docstring
         pass
 
     @abstractmethod
@@ -96,7 +97,7 @@ class PCARetrievalBackend(RetrievalBackend):
             self,
             fingerprinter: PCAFingerprinter,
             search_strategy: PCAFingerprintSearchStrategy,
-            confident_match_threshold: float = 0.4 # vartheta
+            confident_match_threshold: float = 0.4  # vartheta
     ):
         self.fingerprinter = fingerprinter
         self.search_strategy = search_strategy
@@ -159,23 +160,23 @@ class PCARetrievalBackend(RetrievalBackend):
             print(f"PCA Backend: Restricted search space from {original_size} to {len(self.db)} tracks.")
 
     def search_from_file(self, audio: str) -> MatchOutcome:
-        query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_file(audio)
-        best_track, best_score = self.search_strategy.search(query_fingerprint, self.db)
+        Gamma_Q: np.ndarray = self.fingerprinter.get_fingerprint_from_file(audio)
+        s_hat, D_bar_min = self.search_strategy.search(Gamma_Q, self.db)
 
         return MatchOutcome(
-            predicted_track_id=best_track,
-            score=float("inf") if best_track is None else float(best_score),
+            predicted_track_id=s_hat,
+            score=float("inf") if s_hat is None else float(D_bar_min),
             score_name=self.score_name,
             higher_is_better=self.higher_is_better,
         )
 
-    def search_from_samples(self, audio: np.ndarray, sr: float) -> MatchOutcome:
-        query_fingerprint: np.ndarray = self.fingerprinter.get_fingerprint_from_samples(audio)
-        best_track, best_score = self.search_strategy.search(query_fingerprint, self.db)
+    def search_from_samples(self, x: np.ndarray, sr: float) -> MatchOutcome:
+        Gamma_Q: np.ndarray = self.fingerprinter.get_fingerprint_from_samples(x)
+        s_hat, D_bar_min = self.search_strategy.search(Gamma_Q, self.db)
 
         return MatchOutcome(
-            predicted_track_id=best_track,
-            score=float("inf") if best_track is None else float(best_score),
+            predicted_track_id=s_hat,
+            score=float("inf") if s_hat is None else float(D_bar_min),
             score_name=self.score_name,
             higher_is_better=self.higher_is_better,
         )

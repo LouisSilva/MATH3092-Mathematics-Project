@@ -37,6 +37,7 @@ class PCAFingerprinter:
 
         self.is_fitted = False
         self.model = PCA(n_components=phi, random_state=random_state)
+        self.rng = np.random.default_rng(random_state)
 
     def train(self, file_list: list[str]) -> None:
         """
@@ -47,13 +48,13 @@ class PCAFingerprinter:
         M_kappa = 0
 
         # Shuffle the file list to avoid biasing towards the files at the beginning of the dataset
-        np.random.shuffle(file_list)
+        files = self.rng.permutation(file_list)
 
         # Calculate the estimated number of files that will be used to create the matrix, for the tqdm loading bar
-        rho = len(file_list)
+        rho = len(files)
         estimated_num_files = min(rho * self.kappa, self.gamma) // self.kappa
 
-        for file_path in tqdm(file_list, total=estimated_num_files, desc="Creating training data matrix for PCA"):
+        for file_path in tqdm(files, total=estimated_num_files, desc="Creating training data matrix for PCA"):
             # Only allow a max of gamma rows
             gamma_remaining = self.gamma - M_kappa
             if gamma_remaining <= 0:
@@ -73,7 +74,7 @@ class PCAFingerprinter:
 
             per_song_cap = min(self.kappa, gamma_remaining)
             if S.shape[0] > per_song_cap:
-                I_s = np.random.choice(S.shape[0], per_song_cap, replace=False)
+                I_s = self.rng.choice(S.shape[0], per_song_cap, replace=False)
                 S = S[I_s]
 
             # Append these segments to the training matrix

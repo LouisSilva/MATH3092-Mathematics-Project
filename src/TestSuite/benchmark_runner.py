@@ -72,12 +72,12 @@ def _execute_query(
     local_rng = np.random.default_rng(seed)
 
     trials: dict[str, BenchmarkTrial] = {}
-    transformed_audio = None
+    y = None
     sr = None
 
     try:
         # Load the audio and select a random snippet
-        audio_snippet, sr = load_audio(
+        x_Q, sr = load_audio(
             query_path,
             f_s=f_s,
             offset=query_offset,
@@ -85,7 +85,7 @@ def _execute_query(
         )
 
         # Apply some transformation to the audio (e.g. add white noise, distortion, reverb, etc.)
-        transformed_audio = test_case.apply(audio_snippet, sr, local_rng)
+        y = test_case.apply(x_Q, sr, local_rng)
 
         for backend in backends:
             # Initialize the trial in an ERROR state; success paths overwrite this.
@@ -107,7 +107,7 @@ def _execute_query(
             try:
                 # Run the search algorithm and record how much time it takes
                 start_time = time.perf_counter()
-                match_outcome = backend.search_from_samples(transformed_audio, sr)
+                match_outcome = backend.search_from_samples(y, sr)
                 end_time = time.perf_counter()
 
                 # Record the results
@@ -145,7 +145,7 @@ def _execute_query(
 
     finally:
         # Write the queries to disk if the option is enabled in the config
-        if transformed_audio is not None and sr is not None and test_type == TestType.POSITIVE:
+        if y is not None and sr is not None and test_type == TestType.POSITIVE:
             any_failed = any(
                 trial.status in (TestStatus.FAIL, TestStatus.ERROR) for trial in trials.values()
             )
@@ -161,7 +161,7 @@ def _execute_query(
                     f"_{sanitize_filename(target_track_id)}.wav"
                 )
                 target_dir = failed_dir if any_failed else passed_dir
-                sf.write(os.path.join(target_dir, temp_query_filename), transformed_audio, sr)
+                sf.write(os.path.join(target_dir, temp_query_filename), y, sr)
 
     return trials
 

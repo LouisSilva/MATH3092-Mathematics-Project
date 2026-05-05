@@ -1,13 +1,16 @@
 import numpy as np
 from abc import ABC, abstractmethod
 from scipy.signal import convolve
+from joblib import Parallel, delayed
+
 
 class PCAFingerprintSearchStrategy(ABC):
     """An interface for searching a query fingerprint in a database."""
 
     @abstractmethod
-    def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
+    def search(self, Gamma_Q: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         pass
+
 
 class HammingSearchSlow(PCAFingerprintSearchStrategy):
     """
@@ -15,9 +18,9 @@ class HammingSearchSlow(PCAFingerprintSearchStrategy):
     Use with binary fingerprints.
     """
 
-    def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
+    def search(self, Gamma_Q: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         # Ensure fingerprints are bools
-        Gamma_Q = query_fingerprint.astype(bool)
+        Gamma_Q = Gamma_Q.astype(bool)
         M_Q, phi = Gamma_Q.shape
         norm_const = M_Q * phi
 
@@ -61,24 +64,17 @@ class HammingSearchSlow(PCAFingerprintSearchStrategy):
         D_bar_H_min = D_H_min_best / norm_const
         return s_hat, D_bar_H_min
 
+
 class HammingSearch(PCAFingerprintSearchStrategy):
     """
     Searches using a sliding window with Hamming distance.
     Use with binary fingerprints.
     """
 
-    def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
-        # Ensure fingerprints are bools
-        Gamma_Q = query_fingerprint.astype(bool)
-
+    def search(self, Gamma_Q: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         # Get dimensions and calculate the normalization constant
-        M_Q, phi = Gamma_Q.shape
-        norm_const = M_Q * phi
-
-        # Instead of storing the binary fingerprint as an array of bytes,
-        # we compress every sequence of 8 boolean values into a single unsigned
-        # 8-bit integer (uint8), thereby reducing space complexity by a factor of 8
-        Gamma_Q_packed = np.packbits(Gamma_Q, axis=1)
+        M_Q, phi_bytes = Gamma_Q.shape
+        norm_const = M_Q * phi_bytes * 8
 
         # Initialize default values
         s_hat = None
@@ -86,24 +82,21 @@ class HammingSearch(PCAFingerprintSearchStrategy):
 
         # Iterate through every song in the database
         for s, Gamma_s in db.items():
-            Gamma_s = Gamma_s.astype(bool)
             M_s = Gamma_s.shape[0]
 
             # Skip songs that are shorter than the query
             if M_Q > M_s:
                 continue
 
-            Gamma_s_packed = np.packbits(Gamma_s.astype(bool), axis=1)
-
             # Instead of allocating memory and copying each
             # Gamma_s[delta : delta + M_Q - 1, :] sub matrix to a new array,
             # we use an optimized function coded in C which doesn't copy any data
             sliding_window = np.lib.stride_tricks.sliding_window_view(
-                Gamma_s_packed, (M_Q, Gamma_s_packed.shape[1])
+                Gamma_s, (M_Q, Gamma_s.shape[1])
             ).squeeze(axis=1)
 
             # Apply the XOR operator
-            xor = sliding_window ^ Gamma_Q_packed
+            xor = sliding_window ^ Gamma_Q
 
             # Count how many bits are set to 1
             D_all = np.bitwise_count(xor).sum(axis=(1, 2))
@@ -122,20 +115,75 @@ class HammingSearch(PCAFingerprintSearchStrategy):
         D_bar_min = D_min_best / norm_const
         return s_hat, D_bar_min
 
+
+class HammingSearchParallel(PCAFingerprintSearchStrategy):
+    """
+    Searches using a sliding window with Hamming distance.
+    Use with binary fingerprints.
+    """
+
+    def __init__(self, n_jobs: int = -1):
+        self.n_jobs = n_jobs
+
+    @staticmethod
+    def _score_song(
+            Gamma_s: np.ndarray,
+            Gamma_Q: np.ndarray,
+            M_Q: int,
+    ) -> int:
+        """Compute the min Hamming distance for a single DB song."""
+        M_s = Gamma_s.shape[0]
+
+        # Skip songs shorter than the query
+        if M_Q > M_s:
+            return np.iinfo(np.int64).max
+
+        sliding_window = np.lib.stride_tricks.sliding_window_view(
+            Gamma_s, (M_Q, Gamma_s.shape[1])
+        ).squeeze(axis=1)
+
+        xor = sliding_window ^ Gamma_Q
+        D_all = np.bitwise_count(xor).sum(axis=(1, 2))
+        return int(D_all.min())
+
+    def search(
+            self,
+            Gamma_Q: np.ndarray,
+            db: dict[str, np.ndarray],
+    ) -> tuple[str | None, float]:
+        M_Q, phi_bytes = Gamma_Q.shape
+        norm_const = M_Q * phi_bytes * 8
+
+        # Score every song in parallel using threads.
+        # Threads work because numpy ufuncs release the GIL.
+        song_ids = list(db.keys())
+        distances = (Parallel(n_jobs=self.n_jobs, backend="threading")
+            (delayed(self._score_song)(db[s], Gamma_Q, M_Q) for s in song_ids))
+
+        # Find the global minimum
+        D_min_best = min(distances)
+        if D_min_best == np.iinfo(np.int64).max:
+            return None, float('inf')
+
+        s_hat = song_ids[distances.index(D_min_best)]
+        D_bar_min = D_min_best / norm_const
+        return s_hat, D_bar_min
+
+
 class FFTConvolveSearch(PCAFingerprintSearchStrategy):
     """
     Search using 1D FFT Convolution.
     Flattens the 2D fingerprints and computes correlation in one go.
     """
 
-    def search(self, query_fingerprint: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
+    def search(self, Gamma_Q: np.ndarray, db: dict[str, np.ndarray]) -> tuple[str | None, float]:
         # Query shape: (Q, F)
-        Q, F = query_fingerprint.shape
+        Q, F = Gamma_Q.shape
         total_bits = Q * F
 
         # Pre-process query
         # Convert {0, 1} -> {-1, 1}
-        query_bipolar = 2 * query_fingerprint.astype(np.float32) - 1
+        query_bipolar = 2 * Gamma_Q.astype(np.float32) - 1
 
         # Flatten to 1D
         query_flat = query_bipolar.flatten()

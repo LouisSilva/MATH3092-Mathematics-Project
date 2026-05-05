@@ -9,9 +9,11 @@ from .metrics import (
     FalsePositiveRate,
     Precision,
     MeanQueryTime,
+    RawTop1Accuracy,
 )
 
 DEFAULT_TABLE_METRICS: list[Metric] = [
+    RawTop1Accuracy(),
     TruePositiveRate(),
     FalsePositiveRate(),
     Precision(),
@@ -19,6 +21,7 @@ DEFAULT_TABLE_METRICS: list[Metric] = [
 ]
 
 DEFAULT_METRIC_HEADERS: dict[str, str] = {
+    "raw_top1_accuracy_pct": r"\textbf{Top-1}(\%)",
     "recall_pct": r"\textbf{Recall}(\%)",
     "false_pos_rate_pct": r"\textbf{FPR}(\%)",
     "precision_pct": r"\textbf{Precision}(\%)",
@@ -26,6 +29,7 @@ DEFAULT_METRIC_HEADERS: dict[str, str] = {
 }
 
 DEFAULT_METRIC_FORMAT: dict[str, str] = {
+    "raw_top1_accuracy_pct": ".1f",
     "recall_pct": ".1f",
     "false_pos_rate_pct": ".1f",
     "precision_pct": ".1f",
