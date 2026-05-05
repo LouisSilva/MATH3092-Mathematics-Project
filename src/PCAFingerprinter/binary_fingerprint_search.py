@@ -138,12 +138,20 @@ class HammingSearchParallel(PCAFingerprintSearchStrategy):
         if M_Q > M_s:
             return np.iinfo(np.int64).max
 
+        # Instead of allocating memory and copying each
+        # Gamma_s[delta : delta + M_Q - 1, :] sub matrix to a new array,
+        # we use an optimized function coded in C which doesn't copy any data
         sliding_window = np.lib.stride_tricks.sliding_window_view(
             Gamma_s, (M_Q, Gamma_s.shape[1])
         ).squeeze(axis=1)
 
+        # Apply the XOR operator
         xor = sliding_window ^ Gamma_Q
+
+        # Count how many bits are set to 1
         D_all = np.bitwise_count(xor).sum(axis=(1, 2))
+
+        # Apply min
         return int(D_all.min())
 
     def search(
@@ -151,6 +159,7 @@ class HammingSearchParallel(PCAFingerprintSearchStrategy):
             Gamma_Q: np.ndarray,
             db: dict[str, np.ndarray],
     ) -> tuple[str | None, float]:
+        # Get dimensions and calculate the normalization constant
         M_Q, phi_bytes = Gamma_Q.shape
         norm_const = M_Q * phi_bytes * 8
 
