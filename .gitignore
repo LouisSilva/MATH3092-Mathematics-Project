@@ -3,6 +3,7 @@
 /data
 /data_backup
 /notebooks
+/figures/old_figure_making.ipynb
 
 /vendor/audfprint/tests/data
 

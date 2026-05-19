@@ -8,6 +8,9 @@ from matplotlib.lines import Line2D
 import librosa
 import librosa.display
 
+from src.PCAFingerprinter.spectrogram_generation import load_audio
+from src.fma_utils import create_dataset_df
+
 # --- GLOBAL CONFIGURATION ---
 DOCUMENT_TEXT_WIDTH_PT = 469.75499
 DOCUMENT_FONT_SIZE = 12
@@ -52,8 +55,8 @@ def set_report_style(width_pt, font_size=10, aspect_ratio=0.618, dpi=200):
 
 
 def save_figure(fig, prefix, ext="pdf"):
-    os.makedirs("./Figures", exist_ok=True)
-    filepath = f"./Figures/{prefix}_{random_suffix()}.{ext}"
+    os.makedirs("./temp", exist_ok=True)
+    filepath = f"./temp/{prefix}_{random_suffix()}.{ext}"
     fig.savefig(filepath, bbox_inches='tight', pad_inches=0.05)
     print(f"Saved {filepath}")
     plt.close(fig)
@@ -288,25 +291,76 @@ def generate_figure_3_stft_partitioning():
     save_figure(fig, "stft_partitioning", ext="pdf")
 
 
-def generate_spectrogram_figure(y, sr, title, filename_prefix):
-    set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.5, dpi=300)
+def generate_mel_spectrogram_figure(song_filepath, duration, f_s, n_fft, win_len, hop_len, window_type, B, offset=0, ext="pdf"):
+    set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.5, dpi=600)
 
-    hop_len, n_fft, win_len, window_type = 64, 8192, 2048, "hann"
-    stft_matrix = librosa.stft(y, n_fft=n_fft, hop_length=hop_len, window=window_type, win_length=win_len)
-    spectrogram_db = librosa.amplitude_to_db(np.abs(stft_matrix), ref=np.max)
+    x, _ = load_audio(song_filepath, f_s=f_s, offset=offset, duration=duration)
+
+    S_mel = librosa.feature.melspectrogram(y=x, sr=f_s, n_fft=n_fft, win_length=win_len, hop_length=hop_len, window=window_type, n_mels=B, fmin=0, fmax=f_s / 2, power=2)
+    S_db = librosa.power_to_db(S_mel, ref=np.max, top_db=80)
 
     fig, ax = plt.subplots(1, 1)
     img = librosa.display.specshow(
-        spectrogram_db, sr=sr, hop_length=hop_len, x_axis='time', y_axis='log',
-        cmap="inferno", vmin=-70, vmax=0, rasterized=True, ax=ax
+        S_db, sr=f_s, hop_length=hop_len, x_axis='time', y_axis='mel',
+        cmap="inferno", vmin=-80, vmax=0, rasterized=True, ax=ax, fmin=0, fmax=f_s / 2
     )
+
+    ax.set_yticks([128, 512, 1024, 2048, 4096, 8192, 16384])
+    ax.set_yticklabels(['128', '512', '1024', '2048', '4096', '8192', '16384'])
 
     fig.colorbar(img, ax=ax, format="%+2.0f dB", label='Level (dB)')
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Frequency (Hz)")
-    ax.set_title(title)
+    ax.set_title("dB-scaled Mel Spectrogram of a 10-second Audio Track Excerpt")
     plt.tight_layout()
-    save_figure(fig, filename_prefix)
+
+    filename = (
+        f"awol_spectrogram"
+        f"_duration-{duration}"
+        f"_offset-{offset}"
+        f"_fs-{f_s}"
+        f"_nfft-{n_fft}"
+        f"_winlen-{win_len}"
+        f"_hoplen-{hop_len}"
+        f"_window-{window_type}"
+        f"_B-{B}"
+    )
+    save_figure(fig, filename, ext=ext)
+
+
+def generate_white_noise_mel_spectrogram_figure(duration, f_s, n_fft, win_len, hop_len, window_type, B, ext="pdf"):
+    set_report_style(DOCUMENT_TEXT_WIDTH_PT, font_size=DOCUMENT_FONT_SIZE, aspect_ratio=0.5, dpi=300)
+
+    white_noise = np.random.normal(loc=0, scale=1, size=(f_s * duration))
+    S_mel = librosa.feature.melspectrogram(y=white_noise, sr=f_s, n_fft=n_fft, hop_length=hop_len, window=window_type, win_length=win_len, n_mels=B, fmin=0, fmax=f_s / 2, power=2)
+    S_db = librosa.amplitude_to_db(S_mel, ref=np.max, top_db=80)
+
+    fig, ax = plt.subplots(1, 1)
+    img = librosa.display.specshow(
+        S_db, sr=f_s, hop_length=hop_len, x_axis='time', y_axis='mel',
+        cmap="inferno", vmin=-80, vmax=0, rasterized=True, ax=ax, fmin=0, fmax=f_s/2
+    )
+
+    ax.set_yticks([128, 512, 1024, 2048, 4096, 8192, 16384])
+    ax.set_yticklabels(['128', '512', '1024', '2048', '4096', '8192', '16384'])
+
+    fig.colorbar(img, ax=ax, format="%+2.0f dB", label='Level (dB)')
+    ax.set_xlabel("Time (s)")
+    ax.set_ylabel("Frequency (Hz)")
+    ax.set_title("dB-Scaled Mel Spectrogram of Gaussian White Noise")
+    plt.tight_layout()
+
+    filename = (
+        f"white_noise_spectrogram"
+        f"_duration-{duration}"
+        f"_fs-{f_s}"
+        f"_nfft-{n_fft}"
+        f"_winlen-{win_len}"
+        f"_hoplen-{hop_len}"
+        f"_window-{window_type}"
+        f"_B-{B}"
+    )
+    save_figure(fig, filename, ext=ext)
 
 
 def generate_figure_6_mel_mapping():
@@ -541,20 +595,24 @@ def generate_figure_8_gibbs():
 
 
 if __name__ == "__main__":
-    generate_figure_2_aliasing()
+    METADATA_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\fma\\fma_metadata"
+    AUDIO_FILES_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\fma\\fma_small\\fma_small"
+    USER_SONGS_DIR = "B:\\Documents\\Uni\\MATH3092 Mathematics Project\\MusicDatasets\\my_songs"  # random extra songs that aren't part of the FMA dataset
 
-# if __name__ == "__main__":
-#     generate_figure_1_sampling()
-#     generate_figure_2_aliasing()
-#     generate_figure_3_stft_partitioning()
-#
-#     # Executing the unified Spectrogram function for Figures 4 and 5
-#     sample_rate_noise = 44100
-#     white_noise = np.random.randn(int(sample_rate_noise * 10.0))
-#     generate_spectrogram_figure(white_noise, sample_rate_noise, 'Spectrogram of White Noise', 'white_noise_spectrogram')
-#
-#     # Provide your loaded audio array below to reproduce Figure 5
-#     # generate_spectrogram_figure(awol_food_song, sample_rate_noise, 'Spectrogram of a 10-second Audio Excerpt', 'awol_food_spectrogram')
-#
-#     generate_figure_6_mel_mapping()
-#     generate_figure_7_mel_filterbank()
+    tracks, my_songs = create_dataset_df(METADATA_DIR, AUDIO_FILES_DIR, USER_SONGS_DIR)
+
+    duration = 10
+    f_s = 44100
+    n_fft = 4096
+    win_len = n_fft
+    hop_len = 512
+    window_type = "hann"
+    n_mels = 256
+
+    ballistics_filepath = my_songs.loc[my_songs["track_title"] == "14 - Ball-istics Outro.flac", "filepath"].iloc[0]
+
+    # generate_mel_spectrogram_figure(tracks.iloc[0], duration=duration, f_s=f_s, n_fft=n_fft, win_len=win_len, hop_len=hop_len, window_type=window_type, B=n_mels)
+    # generate_white_noise_mel_spectrogram_figure(duration=duration, f_s=f_s, n_fft=n_fft, win_len=win_len, hop_len=hop_len, window_type=window_type, B=n_mels)
+
+    generate_mel_spectrogram_figure(ballistics_filepath, duration=10, f_s=f_s, n_fft=n_fft, win_len=win_len, hop_len=hop_len, window_type=window_type, B=n_mels, offset=10, ext="png") # duration=6
+    generate_white_noise_mel_spectrogram_figure(duration=duration, f_s=f_s, n_fft=n_fft, win_len=win_len, hop_len=hop_len, window_type=window_type, B=n_mels, ext="png")
